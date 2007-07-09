@@ -22,7 +22,7 @@ function versioncontrol_project_install() {
     case 'mysql':
       db_query("CREATE TABLE {versioncontrol_project_projects} (
         nid int unsigned NOT NULL default '0',
-        repoid int unsigned NOT NULL default '0',
+        repo_id int unsigned NOT NULL default '0',
         directory varchar(255) NOT NULL default '',
         PRIMARY KEY (nid),
         KEY directory (directory)
