@@ -1,0 +1,183 @@
+<?php
+// $Id$
+/**
+ * @file
+ * Version Control / Project Node Integration - Integrates nodes of any content
+ * type with version control systems supported by the Version Control API.
+ *
+ * Copyright 2007 by Jakob Petsovits <jpetso@gmx.at>
+ *
+ * Distributed under the GNU General Public Licence version 2 or higher,
+ * as published by the FSF on http://www.gnu.org/copyleft/gpl.html
+ */
+
+/**
+ * Retrieve a set of commits for the specified repository if they match the
+ * given constraints. If no single commit matches these constraints,
+ * an empty array is returned.
+ *
+ * @param $constraints
+ *   An optional array of constraints. Possible array elements handled by
+ *   this module are:
+ *
+ *   'nids': An array of project node ids.
+ *           If given, only commits for these projects will be returned.
+ *   'maintainer_uids': An array of Drupal user ids. If given, the result set
+ *                      will only contain commits that correspond to one of
+ *                      the projects that any of the specified users maintain.
+ *
+ *   In addition to this module specific constraint, you can also use
+ *   the constraints defined by the Version Control API:
+ *
+ *   'vcs': An array of strings, like array('cvs', 'svn', 'git').
+ *          If given, only commits for these backends will be returned.
+ *   'repo_ids': An array of repository ids. If given, only commits
+ *               for the corresponding repositories will be returned.
+ *   'branches': An array of strings, specified separately for each repository,
+ *               like array($repo_id => array('HEAD', 'DRUPAL-5')).
+ *               If given, only commits on the given branches will be returned.
+ *   'tags': An array of strings, specified separately for each repository,
+ *           like array($repo_id => array('DRUPAL-4-7--1-1', 'DRUPAL-5--1-3')).
+ *           If given, only commits captured by these tags will be returned.
+ *   'paths': An array of strings (item locations), specified separately
+ *            for each repository, like
+ *              array($repo_id => array(
+ *                '/trunk/contributions/modules/versioncontrol',
+ *                '/trunk/contributions/themes/b2',
+ *              )).
+ *            If given, only commits that affected this item (or its children,
+ *            in case the item is a directory) will be returned.
+ *   'commit_id_lower': A commit id. If given, the result set will not contain
+ *                      commits earlier than this lower bound. Mind that
+ *                      commit ids only correspond to chronological order
+ *                      within the bounds of each repository.
+ *   'commit_id_upper': A commit id. If given, the result set will not contain
+ *                      commits later than this upper bound. Mind that
+ *                      commit ids only correspond to chronological order
+ *                      within the bounds of each repository.
+ *   'date_lower': A Unix timestamp. If given, the result set will not contain
+ *                 commits earlier than this lower bound.
+ *   'date_upper': A Unix timestamp. If given, the result set will not contain
+ *                 commits later than this upper bound.
+ *   'uids': An array of Drupal user ids. If given, the result set will only
+ *           contain commits that correspond to any of the specified users.
+ *   'usernames': An array of system-specific usernames (the ones that the
+ *                revision control systems themselves get to see).
+ *                Specified separately for each repository, like
+ *                array($repo_id => array('dww', 'jpetso')).
+ *                If given, the result set will only contain commits that
+ *                correspond to any of the specified users.
+ *   '[xxx]_specific': An array of VCS specific constraints. How this array
+ *                     looks like is defined by the corresponding backend
+ *                     module ([xxx]_backend). Other backend modules won't
+ *                     get to see this constraint, so in theory you can provide
+ *                     one of those for each backend in one single query.
+ *
+ * @return
+ *   An array of commits, reversely sorted by the time of the commit.
+ *   Each element contains a structured array with the following keys:
+ *
+ *   'commit_id': The Drupal-specific commit identifier (a simple integer)
+ *                which is unique among all commits in all repositories.
+ *   'repository': The repository where this commit occurred.
+ *                 This is a structured array, like a single element of
+ *                 what is returned by versioncontrol_get_repositories().
+ *   'date': The time when the revision was committed, given as Unix timestamp.
+ *   'uid': The Drupal user id of the committer.
+ *   'username': The system specific VCS username of the committer.
+ *   'message': The commit message.
+ *   'revision': The VCS specific commit identifier, like "1.2.2.4" in CVS,
+ *               "27491" in Subversion or an SHA-1 key in various distributed
+ *               version control systems.
+ *
+ *   Additional elements may be added by specific version control system backends.
+ */
+versioncontrol_project_get_commits($constraints = array()) {
+}
+
+/**
+ * Retrieve a list of all project information for each of the given node ids
+ * where the corresponding user is marked as maintainer of the project node.
+ *
+ * @param $nid_list
+ *   An array of project node ids for which the project information
+ *   should be retrieved.
+ *
+ * @return
+ *   An array of mappings between nid and project information that looks like
+ *     array(
+ *       $nid => array(
+ *         'nid' => $nid,
+ *         'repo_id' => $repo_id,
+ *         'directory' => $project_directory,
+ *       ),
+ *       ...
+ *     ).
+ *   Node ids for nodes without an assigned project are discarded and
+ *   don't appear in the result value. If no projects can be found
+ *   for the given nids, an empty array is returned.
+ */
+versioncontrol_project_get_projects_by_node($nid_list) {
+}
+
+/**
+ * Retrieve a list of all projects for each of the given Drupal uids
+ * where the corresponding user is marked as maintainer of the project node.
+ *
+ * @param $uid_list
+ *   An array of Drupal uids for which the maintained projects
+ *   should be retrieved.
+ *
+ * @return
+ *   An array of mappings between uid and project information that looks like
+ *     array(
+ *       $uid => array(
+ *         $nid => array(
+ *           'nid' => $nid,
+ *           'repo_id' => $repo_id,
+ *           'directory' => $project_directory,
+ *         ),
+ *         ...
+ *       ),
+ *       ...
+ *     ).
+ *   uids for users without maintainership of any project are discarded and
+ *   don't appear in the result value. If no projects can be found for the
+ *   given uids, an empty array is returned.
+ */
+versioncontrol_project_get_projects_by_maintainer($uid_list) {
+}
+
+/**
+ * Retrieve the project for the given item (file or directory) in a repository.
+ *
+ * @param $repository
+ *   The repository which contains the item.
+ * @param $path
+ *   The path of the item.
+ *
+ * @return
+ *   A structured array that looks like
+ *     array(
+ *       'nid' => $nid,
+ *       'repo_id' => $repo_id,
+ *       'directory' => $project_directory,
+ *     ),
+ *   or NULL if the item doesn't belong to any project.
+ */
+versioncontrol_project_get_project_for_item($repository, $path) {
+}
+
+/**
+ * Retrieve a list of all maintainers for each of the given project nodes.
+ *
+ * @param $nid_list
+ *   An array of node ids for which the maintainers should be retrieved.
+ *
+ * @return
+ *   An array containing an nid / maintainer uid mapping that looks like
+ *   array($nid => array($uid1, uid2, ...), ...). If no maintainers
+ *   can be found for the given nodes, an empty array is returned.
+ */
+versioncontrol_project_get_maintainers($nid_list) {
+}
