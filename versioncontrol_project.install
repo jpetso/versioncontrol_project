@@ -1,0 +1,42 @@
+<?php
+// $Id$
+/**
+ * @file
+ * Version Control / Project Node Integration - Integrates nodes of any content
+ * type with version control systems supported by the Version Control API.
+ *
+ * Copyright 2006 by Karthik ("Zen", http://drupal.org/user/21209)
+ * Copyright 2006, 2007 by Derek Wright ("dww", http://drupal.org/user/46549)
+ * Copyright 2007 by Jakob Petsovits <jpetso@gmx.at>
+ *
+ * Distributed under the GNU General Public Licence version 2 or higher,
+ * as published by the FSF on http://www.gnu.org/copyleft/gpl.html
+ */
+
+/**
+ * Implementation of hook_install().
+ */
+function versioncontrol_project_install() {
+  switch ($GLOBALS['db_type']) {
+    case 'mysqli':
+    case 'mysql':
+      db_query("CREATE TABLE {versioncontrol_project_projects} (
+        nid int unsigned NOT NULL default '0',
+        repoid int unsigned NOT NULL default '0',
+        directory varchar(255) NOT NULL default '',
+        PRIMARY KEY (nid),
+        KEY directory (directory)
+      ) /*!40100 DEFAULT CHARACTER SET utf8 */");
+
+      db_query("CREATE TABLE {versioncontrol_project_maintainers} (
+        nid int unsigned NOT NULL default '0',
+        uid int unsigned NOT NULL default '0',
+        PRIMARY KEY (nid, uid)
+      ) /*!40100 DEFAULT CHARACTER SET utf8 */");
+
+      break;
+
+    case 'pgsql':
+      break;
+  }
+}

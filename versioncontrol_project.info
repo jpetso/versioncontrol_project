@@ -1,0 +1,5 @@
+; $Id$
+name = "Version Control / Project Node Integration"
+description = "Integrates nodes of any content type with version control systems supported by the Version Control API."
+dependencies = versioncontrol
+package = Version Control
