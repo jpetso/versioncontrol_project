@@ -10,6 +10,9 @@
  * Distributed under the GNU General Public Licence version 2 or higher,
  * as published by the FSF on http://www.gnu.org/copyleft/gpl.html
  */
+// TODO: hook into nodeapi and catch author changes of project nodes
+//       (for updating the maintainer database),
+//       and project node deletions (for having a delete_project() call)
 
 /**
  * Retrieve a set of commits for the specified repository if they match the
@@ -92,19 +95,91 @@
  *
  *   Additional elements may be added by specific version control system backends.
  */
-versioncontrol_project_get_commits($constraints = array()) {
+function versioncontrol_project_get_commits($constraints = array()) {
+  if (isset($constraints['maintainer_uids'])) {
+    $paths = array();
+    $projects = versioncontrol_project_get_projects_by_maintainer($constraints['maintainer_uids']);
+    unset($constraints['maintainer_uids']); // no need to pass this on
+
+    foreach ($projects as $maintainer_uid => $value) {
+      foreach ($value as $nid => $project) {
+        $paths[] = $project->directory;
+      }
+    }
+
+    // In case the caller has also passed a 'paths' constraint, intersect this
+    // with the paths determined by the 'maintainer_uid' constraint
+    // so that there is a real 'AND' condition.
+    if (isset($constraints['paths'])) {
+      // TODO: check for the existance of PHP version array_intersect().
+      $constraints['paths'] = array_intersect($paths, $constraints['paths']);
+    }
+  }
+
+  if (isset($constraints['nids'])) {
+    $paths = array();
+    $projects = versioncontrol_project_get_projects_by_node($constraints['nids']);
+    unset($constraints['nids']); // no need to pass this on
+
+    foreach ($projects as $nid => $project) {
+      $paths[] = $project['directory'];
+    }
+
+    // In case the caller has also passed a 'paths' constraint, intersect this
+    // with the paths determined by the 'nids' constraint so that there is
+    // a real 'AND' condition.
+    if (isset($constraints['paths'])) {
+      // TODO: check for the existance and PHP version of array_intersect().
+      $constraints['paths'] = array_intersect($paths, $constraints['paths']);
+    }
+  }
+
+  return versioncontrol_get_commits($constraints);
 }
 
+
 /**
- * Retrieve a list of all project information for each of the given node ids
- * where the corresponding user is marked as maintainer of the project node.
+ * Retrieve a list of all maintainers for each of the given project nodes.
  *
- * @param $nid_list
- *   An array of project node ids for which the project information
- *   should be retrieved.
+ * @param $project_nids
+ *   An array of node ids for which the maintainers should be retrieved.
  *
  * @return
- *   An array of mappings between nid and project information that looks like
+ *   An array containing an nid / maintainer uid mapping that looks like
+ *   array($nid => array($uid1, uid2, ...), ...). If no maintainers
+ *   can be found for the given nodes, an empty array is returned.
+ */
+function versioncontrol_project_get_maintainers($project_nids) {
+  $nid_constraints = array();
+  foreach ($project_nids as $nid) {
+    $nid_constraints[] = "nid = '%d'";
+  }
+
+  $maintainers = array();
+  $result = db_query('SELECT * FROM {versioncontrol_project_maintainers}
+                      WHERE '. implode(' OR ', $nid_constraints), $project_nids);
+
+  while ($mapping = db_fetch_object($result)) {
+    if (!isset($maintainers[$mapping->nid]) {
+      $maintainers[$mapping->nid] = array();
+    }
+    $maintainers[$mapping->nid][] = $mapping->uid;
+  }
+  return $maintainers;
+}
+
+
+/**
+ * Retrieve a list of all projects for each of the given node ids, including
+ * detailed project data for all of the found projects. If no list of node ids
+ * is given, all existing projects will be retrieved.
+ *
+ * @param $project_nids
+ *   An array of project node ids for which the project information
+ *   should be retrieved, or NULL for all existing projects.
+ *
+ * @return
+ *   An array of mappings between nid and project data that looks like
  *     array(
  *       $nid => array(
  *         'nid' => $nid,
@@ -114,22 +189,43 @@ versioncontrol_project_get_commits($constraints = array()) {
  *       ...
  *     ).
  *   Node ids for nodes without an assigned project are discarded and
- *   don't appear in the result value. If no projects can be found
- *   for the given nids, an empty array is returned.
+ *   don't appear in the result value. If no projects can be found,
+ *   an empty array is returned.
  */
-versioncontrol_project_get_projects_by_node($nid_list) {
+function versioncontrol_project_get_projects($project_nids = NULL) {
+  if (isset($project_nids)) {
+    $nid_constraints = array();
+    foreach ($project_nids as $nid) {
+      $nid_constraints[] = "nid = '%d'";
+    }
+    $result = db_query('SELECT * FROM {versioncontrol_project_projects}
+                        WHERE '. implode(' OR ', $nid_constraints), $project_nids);
+  }
+  else {
+    $result = db_query('SELECT * FROM {versioncontrol_project_projects}');
+  }
+
+  $projects = array();
+  while ($project = db_fetch_array($result)) {
+    $projects[$project['nid']] = $project;
+  }
+  return $projects;
 }
+
 
 /**
  * Retrieve a list of all projects for each of the given Drupal uids
- * where the corresponding user is marked as maintainer of the project node.
+ * where the corresponding user is marked as maintainer of the project node,
+ * including detailed project data for all of the found projects.
+ * If no list of node ids is given, all existing maintainer/project mappings
+ * will be retrieved.
  *
- * @param $uid_list
- *   An array of Drupal uids for which the maintained projects
- *   should be retrieved.
+ * @param $maintainer_uids
+ *   An array of Drupal uids for which the maintained projects should be
+ *   retrieved, or NULL for all existing maintainer/project mappings.
  *
  * @return
- *   An array of mappings between uid and project information that looks like
+ *   An array of mappings between maintainer uid and project data that looks like
  *     array(
  *       $uid => array(
  *         $nid => array(
@@ -142,11 +238,42 @@ versioncontrol_project_get_projects_by_node($nid_list) {
  *       ...
  *     ).
  *   uids for users without maintainership of any project are discarded and
- *   don't appear in the result value. If no projects can be found for the
- *   given uids, an empty array is returned.
+ *   don't appear in the result value. If no projects can be found,
+ *   an empty array is returned.
  */
-versioncontrol_project_get_projects_by_maintainer($uid_list) {
+function versioncontrol_project_get_projects_by_maintainer($maintainer_uids = NULL) {
+  if (isset($maintainer_uids)) {
+    $uid_constraints = array();
+    foreach ($maintainer_uids as $uid) {
+      $uid_constraints[] = "m.uid = '%d'";
+    }
+
+    $result = db_query('SELECT m.mid, p.*
+                        FROM {versioncontrol_project_maintainers} m
+                         AND {versioncontrol_project_projects} p
+                        WHERE ('. implode(' OR ', $uid_constraints) .')
+                         AND m.nid = p.nid', $maintainer_uids);
+  }
+  else {
+    $result = db_query('SELECT m.mid, p.*
+                        FROM {versioncontrol_project_maintainers} m
+                         AND {versioncontrol_project_projects} p
+                        WHERE m.nid = p.nid');
+  }
+
+  $projects = array();
+  while ($project = db_fetch_array($result)) {
+    $uid = $project['uid'];
+    unset($project['uid']);
+
+    if (!isset($projects[$uid]) {
+      $projects[$uid] = array();
+    }
+    $projects[$uid][$project['nid']] = $project;
+  }
+  return $projects;
 }
+
 
 /**
  * Retrieve the project for the given item (file or directory) in a repository.
@@ -157,7 +284,7 @@ versioncontrol_project_get_projects_by_maintainer($uid_list) {
  *   The path of the item.
  *
  * @return
- *   A structured array that looks like
+ *   A structured array with project data that looks like
  *     array(
  *       'nid' => $nid,
  *       'repo_id' => $repo_id,
@@ -165,19 +292,137 @@ versioncontrol_project_get_projects_by_maintainer($uid_list) {
  *     ),
  *   or NULL if the item doesn't belong to any project.
  */
-versioncontrol_project_get_project_for_item($repository, $path) {
+function versioncontrol_project_get_project_for_item($repository, $path) {
+  // TODO: Can this be worded in SQL instead of retrieving all projects?
+  $projects = versioncontrol_project_get_projects();
+
+  foreach ($projects as $nid => $project) {
+    if (strpos($path, $project['directory']) !== FALSE) {
+      return $project;
+    }
+  }
+  return NULL;
+}
+
+
+/**
+ * Add or update a project. This operation will fail if the given project's nid
+ * doesn't correspond to an existing node, or if another project with the same
+ * project directory as the given one already exists.
+ *
+ * @param $project
+ *   A structured array with project data that looks like
+ *     array(
+ *       'nid' => $nid,
+ *       'repo_id' => $repo_id,
+ *       'directory' => $project_directory,
+ *     ).
+ * @param $maintainer_uids
+ *   An array of Drupal uids specifying the project maintainers. The node owner
+ *   will always have maintainer status, even if not included in the uid list.
+ *
+ * @return
+ *   TRUE if the project was added or updated successfully, or FALSE if
+ *   the operation didn't succeed.
+ */
+function versioncontrol_project_set_project($project, $maintainer_uids = array()) {
+  // Don't do this if another project with the same directory already exists.
+  $existing_project = versioncontrol_project_get_project_for_item($project->directory);
+  if (isset($existing_project) && $existing_project['nid'] != $project['nid']) {
+    return FALSE;
+  }
+
+  // Get the project node, so we can determine the node owner.
+  $node = node_load($project->nid);
+  if (!isset($node->nid)) { // the node doesn't exist
+    return FALSE;
+  }
+
+  // If the entry already exists, delete it
+  _versioncontrol_project_delete_project($project->nid);
+
+  db_query("INSERT INTO {versioncontrol_project_projects}
+            VALUES ('%d', '%d', '%s')",
+           $project->nid, $project->repo_id, $project->directory);
+
+  _versioncontrol_project_add_maintainers($project->nid, $node->uid, $maintainer_uids);
+  return TRUE;
 }
 
 /**
- * Retrieve a list of all maintainers for each of the given project nodes.
+ * Delete a given project and its maintainer associations from the database.
  *
- * @param $nid_list
- *   An array of node ids for which the maintainers should be retrieved.
+ * @param $project_nid
+ *   The node id of the project that should be deleted.
+ */
+function versioncontrol_project_delete_project($project_nid) {
+  // Deletion hooks, if any, will go here.
+  _versioncontrol_project_delete_project($project_nid);
+}
+
+function _versioncontrol_project_delete_project($project_nid) {
+  db_result(db_query("DELETE FROM {versioncontrol_project_projects}
+                      WHERE nid = '%d'", $project_nid));
+  db_result(db_query("DELETE FROM {versioncontrol_project_maintainers}
+                      WHERE nid = '%d'", $project_nid));
+}
+
+
+/**
+ * Assign one or more maintainers for the given project node. Any previously
+ * existing maintainer entries will be replaced by the new set of maintainers.
+ * This operation will fail if the given project node doesn't exist or has
+ * no project assigned.
+ *
+ * @param $project_nid
+ *   The node id of the project node.
+ * @param $maintainer_uids
+ *   An array of Drupal uids specifying the project maintainers. The node owner
+ *   will always have maintainer status, even if not included in the uid list.
  *
  * @return
- *   An array containing an nid / maintainer uid mapping that looks like
- *   array($nid => array($uid1, uid2, ...), ...). If no maintainers
- *   can be found for the given nodes, an empty array is returned.
+ *   TRUE if the maintainers were added or updated successfully, or FALSE if
+ *   the operation didn't succeed.
  */
-versioncontrol_project_get_maintainers($nid_list) {
+function versioncontrol_project_set_maintainers($project_nid, $maintainer_uids) {
+  // Don't do this if there is no corresponding project entry.
+  $count = db_result(db_query("SELECT COUNT(*)
+                               FROM {versioncontrol_project_projects}
+                               WHERE nid = '%d'", $project_nid));
+  if ($count == 0) {
+    return FALSE;
+  }
+
+  // Get the project node, so we can determine the node owner.
+  $node = node_load($project_nid);
+  if (!isset($node->nid)) { // the node doesn't exist
+    return FALSE;
+  }
+
+  db_query("DELETE FROM {versioncontrol_project_maintainers}
+            WHERE nid = '%d'", $project_nid);
+  _versioncontrol_project_add_maintainers($project->nid, $node->uid, $maintainer_uids);
+  return TRUE;
+}
+
+/**
+ * Insert maintainer entries for the given project node into the database.
+ *
+ * @param $project_nid
+ *   The node id of the project node.
+ * @param $node_owner_uid
+ *   The user id of the owner of the project node.
+ * @param $maintainer_uids
+ *   An array of Drupal uids specifying the project maintainers. The node owner
+ *   will always be registered as maintainer, even if not included in this list.
+ */
+function _versioncontrol_project_add_maintainers($project_nid, $node_owner_uid, $maintainer_uids) {
+  // always include the node owner as project maintainer
+  if (!in_array($node_owner_uid, $maintainer_uids)) {
+    $maintainer_uids[] = $node_owner_uid;
+  }
+  foreach ($maintainer_uids as $uid) {
+    db_query("INSERT INTO {versioncontrol_project_maintainers}
+              VALUES ('%d', '%d')", $project_nid, $uid);
+  }
 }
