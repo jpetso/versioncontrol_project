@@ -27,6 +27,8 @@ function versioncontrol_project_install() {
         PRIMARY KEY (nid),
         KEY directory (directory)
       ) /*!40100 DEFAULT CHARACTER SET utf8 */");
+      // TODO: make it possible to have multiple repositories per node,
+      //       possibly with different maintainership assignments.
 
       db_query("CREATE TABLE {versioncontrol_project_maintainers} (
         nid int unsigned NOT NULL default '0',

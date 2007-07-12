@@ -39,9 +39,6 @@
  *   'branches': An array of strings, specified separately for each repository,
  *               like array($repo_id => array('HEAD', 'DRUPAL-5')).
  *               If given, only commits on the given branches will be returned.
- *   'tags': An array of strings, specified separately for each repository,
- *           like array($repo_id => array('DRUPAL-4-7--1-1', 'DRUPAL-5--1-3')).
- *           If given, only commits captured by these tags will be returned.
  *   'paths': An array of strings (item locations), specified separately
  *            for each repository, like
  *              array($repo_id => array(
