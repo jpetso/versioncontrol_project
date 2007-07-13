@@ -25,7 +25,7 @@ function versioncontrol_project_install() {
         repo_id int unsigned NOT NULL default '0',
         directory varchar(255) NOT NULL default '',
         PRIMARY KEY (nid),
-        KEY directory (directory)
+        UNIQUE KEY (repo_id, directory)
       ) /*!40100 DEFAULT CHARACTER SET utf8 */");
       // TODO: make it possible to have multiple repositories per node,
       //       possibly with different maintainership assignments.
@@ -34,6 +34,14 @@ function versioncontrol_project_install() {
         nid int unsigned NOT NULL default '0',
         uid int unsigned NOT NULL default '0',
         PRIMARY KEY (nid, uid)
+      ) /*!40100 DEFAULT CHARACTER SET utf8 */");
+
+      db_query("CREATE TABLE {versioncontrol_project_applications} (
+        uid int unsigned NOT NULL default '0',
+        nid int unsigned NOT NULL default '0',
+        motivation text,
+        status tinyint NOT NULL default '0',
+        PRIMARY KEY (uid, nid)
       ) /*!40100 DEFAULT CHARACTER SET utf8 */");
 
       break;
