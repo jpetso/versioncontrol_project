@@ -7,10 +7,7 @@
  *
  * Copyright 2006 by Karthik ("Zen", http://drupal.org/user/21209)
  * Copyright 2006, 2007 by Derek Wright ("dww", http://drupal.org/user/46549)
- * Copyright 2007 by Jakob Petsovits <jpetso@gmx.at>
- *
- * Distributed under the GNU General Public Licence version 2 or higher,
- * as published by the FSF on http://www.gnu.org/copyleft/gpl.html
+ * Copyright 2007 by Jakob Petsovits (http://drupal.org/user/56020)
  */
 
 /**
@@ -49,4 +46,14 @@ function versioncontrol_project_install() {
     case 'pgsql':
       break;
   }
+}
+
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function versioncontrol_project_uninstall() {
+  db_query("DROP TABLE {versioncontrol_project_projects}");
+  db_query("DROP TABLE {versioncontrol_project_maintainers}");
+  db_query("DROP TABLE {versioncontrol_project_applications}");
 }

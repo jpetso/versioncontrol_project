@@ -5,10 +5,8 @@
  * Version Control / Project Node Integration - Integrates nodes of any content
  * type with version control systems supported by the Version Control API.
  *
- * Copyright 2007 by Jakob Petsovits <jpetso@gmx.at>
- *
- * Distributed under the GNU General Public Licence version 2 or higher,
- * as published by the FSF on http://www.gnu.org/copyleft/gpl.html
+ * Copyright 2006, 2007 Derek Wright "dww" (http://drupal.org/user/46549)
+ * Copyright 2007 by Jakob Petsovits (http://drupal.org/user/56020)
  */
 // TODO: hook into nodeapi and catch author changes of project nodes
 //       (for updating the maintainer database),
@@ -165,7 +163,7 @@ function versioncontrol_project_get_maintainers($project_nids) {
                       WHERE '. implode(' OR ', $nid_constraints), $project_nids);
 
   while ($mapping = db_fetch_object($result)) {
-    if (!isset($maintainers[$mapping->nid]) {
+    if (!isset($maintainers[$mapping->nid])) {
       $maintainers[$mapping->nid] = array();
     }
     $maintainers[$mapping->nid][] = $mapping->uid;
@@ -271,7 +269,7 @@ function versioncontrol_project_get_projects_by_maintainer($maintainer_uids = NU
     $uid = $project['uid'];
     unset($project['uid']);
 
-    if (!isset($projects[$uid]) {
+    if (!isset($projects[$uid])) {
       $projects[$uid] = array();
     }
     $projects[$uid][$project['nid']] = $project;
@@ -298,15 +296,34 @@ function versioncontrol_project_get_projects_by_maintainer($maintainer_uids = NU
  *   or NULL if the item doesn't belong to any project.
  */
 function versioncontrol_project_get_project_for_item($repository, $path) {
-  // TODO: Can this be worded in SQL instead of retrieving all projects?
-  $projects = versioncontrol_project_get_projects();
+  static $projects_for_item = array();
 
-  foreach ($projects as $nid => $project) {
-    if (strpos($path, $project['directory']) !== FALSE) {
-      return $project;
+  if (!isset($projects_for_item[$path])) {
+    $path_parts = explode('/', $path);
+
+    // Now, we loop over the path, using the most restrictive path
+    // first, and query the DB to find a matching published project node.
+    while (!empty($path_parts)) {
+      $project_directory = '/'. implode('/', $path_parts);
+      array_pop($path_parts);
+
+      $result = db_query("SELECT p.nid, p.repo_id, p.directory
+                          FROM {versioncontrol_project_projects} p
+                           INNER JOIN {node} n ON p.nid = n.nid
+                          WHERE n.status = 1
+                           AND p.repo_id = '%d'
+                           AND p.directory = '%s'",
+                         $repository['repo_id'], $project_directory);
+
+      if ($project = db_fetch_array($result)) {
+        return $projects_for_item[$path] = $project;
+      }
     }
+
+    // If we didn't find it already, cache the answer as not-found
+    $projects_for_item[$path] = 0;
   }
-  return NULL;
+  return ($projects_for_item[$path] != 0) ? $projects_for_item[$path] : NULL;
 }
 
 
