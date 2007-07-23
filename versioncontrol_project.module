@@ -5,8 +5,8 @@
  * Version Control / Project Node Integration - Integrates nodes of any content
  * type with version control systems supported by the Version Control API.
  *
- * Copyright 2006, 2007 Derek Wright "dww" (http://drupal.org/user/46549)
- * Copyright 2007 by Jakob Petsovits (http://drupal.org/user/56020)
+ * Copyright 2006, 2007 Derek Wright ("dww" , http://drupal.org/user/46549)
+ * Copyright 2007 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
 // TODO: hook into nodeapi and catch author changes of project nodes
 //       (for updating the maintainer database),
