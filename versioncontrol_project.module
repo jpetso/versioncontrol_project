@@ -21,13 +21,15 @@ define('VERSIONCONTROL_PROJECT_APPLICATION_DISABLED',        4);
 define('VERSIONCONTROL_PROJECT_APPLICATION_MIN_PASS_LENGTH', 5);
 
 /**
- * Retrieve a set of commits for the specified repository if they match the
- * given constraints. If no single commit matches these constraints,
- * an empty array is returned.
+ * Add project specific constraints to an existing array of commit constraints.
  *
  * @param $constraints
- *   An optional array of constraints. Possible array elements handled by
- *   this module are:
+ *   The constraints array that you already prepared for passing to
+ *   versioncontrol_get_commits().
+ *
+ * @param $project_constraints
+ *   An array of project specific constraints.
+ *   Possible array elements handled by this module are:
  *
  *   'nids': An array of project node ids.
  *           If given, only commits for these projects will be returned.
@@ -35,74 +37,15 @@ define('VERSIONCONTROL_PROJECT_APPLICATION_MIN_PASS_LENGTH', 5);
  *                      will only contain commits that correspond to one of
  *                      the projects that any of the specified users maintain.
  *
- *   In addition to this module specific constraint, you can also use
- *   the constraints defined by the Version Control API:
- *
- *   'vcs': An array of strings, like array('cvs', 'svn', 'git').
- *          If given, only commits for these backends will be returned.
- *   'repo_ids': An array of repository ids. If given, only commits
- *               for the corresponding repositories will be returned.
- *   'branches': An array of strings, specified separately for each repository,
- *               like array($repo_id => array('HEAD', 'DRUPAL-5')).
- *               If given, only commits on the given branches will be returned.
- *   'paths': An array of strings (item locations), specified separately
- *            for each repository, like
- *              array($repo_id => array(
- *                '/trunk/contributions/modules/versioncontrol',
- *                '/trunk/contributions/themes/b2',
- *              )).
- *            If given, only commits that affected this item (or its children,
- *            in case the item is a directory) will be returned.
- *   'commit_id_lower': A commit id. If given, the result set will not contain
- *                      commits earlier than this lower bound. Mind that
- *                      commit ids only correspond to chronological order
- *                      within the bounds of each repository.
- *   'commit_id_upper': A commit id. If given, the result set will not contain
- *                      commits later than this upper bound. Mind that
- *                      commit ids only correspond to chronological order
- *                      within the bounds of each repository.
- *   'date_lower': A Unix timestamp. If given, the result set will not contain
- *                 commits earlier than this lower bound.
- *   'date_upper': A Unix timestamp. If given, the result set will not contain
- *                 commits later than this upper bound.
- *   'uids': An array of Drupal user ids. If given, the result set will only
- *           contain commits that correspond to any of the specified users.
- *   'usernames': An array of system-specific usernames (the ones that the
- *                revision control systems themselves get to see).
- *                Specified separately for each repository, like
- *                array($repo_id => array('dww', 'jpetso')).
- *                If given, the result set will only contain commits that
- *                correspond to any of the specified users.
- *   '[xxx]_specific': An array of VCS specific constraints. How this array
- *                     looks like is defined by the corresponding backend
- *                     module ([xxx]_backend). Other backend modules won't
- *                     get to see this constraint, so in theory you can provide
- *                     one of those for each backend in one single query.
- *
  * @return
- *   An array of commits, reversely sorted by the time of the commit.
- *   Each element contains a structured array with the following keys:
- *
- *   'commit_id': The Drupal-specific commit identifier (a simple integer)
- *                which is unique among all commits in all repositories.
- *   'repository': The repository where this commit occurred.
- *                 This is a structured array, like a single element of
- *                 what is returned by versioncontrol_get_repositories().
- *   'date': The time when the revision was committed, given as Unix timestamp.
- *   'uid': The Drupal user id of the committer.
- *   'username': The system specific VCS username of the committer.
- *   'message': The commit message.
- *   'revision': The VCS specific commit identifier, like "1.2.2.4" in CVS,
- *               "27491" in Subversion or an SHA-1 key in various distributed
- *               version control systems.
- *
- *   Additional elements may be added by specific version control system backends.
+ *   A modified $constraints array that includes the additional constraints
+ *   from $project_constraints, in a way that the Version Control API can
+ *   understand it.
  */
-function versioncontrol_project_get_commits($constraints = array()) {
-  if (isset($constraints['maintainer_uids'])) {
+function versioncontrol_project_alter_commit_constraints($constraints, $project_constraints) {
+  if (isset($project_constraints['maintainer_uids'])) {
     $paths = array();
-    $projects = versioncontrol_project_get_projects_by_maintainer($constraints['maintainer_uids']);
-    unset($constraints['maintainer_uids']); // no need to pass this on
+    $projects = versioncontrol_project_get_projects_by_maintainer($project_constraints['maintainer_uids']);
 
     foreach ($projects as $maintainer_uid => $value) {
       foreach ($value as $nid => $project) {
@@ -113,16 +56,14 @@ function versioncontrol_project_get_commits($constraints = array()) {
     // In case the caller has also passed a 'paths' constraint, intersect this
     // with the paths determined by the 'maintainer_uid' constraint
     // so that there is a real 'AND' condition.
-    if (isset($constraints['paths'])) {
-      // TODO: check for the existance of PHP version array_intersect().
-      $constraints['paths'] = array_intersect($paths, $constraints['paths']);
-    }
+    $constraints['paths'] = isset($constraints['paths']
+                            ? array_intersect($paths, $constraints['paths'])
+                            : $paths;
   }
 
-  if (isset($constraints['nids'])) {
+  if (isset($project_constraints['nids'])) {
     $paths = array();
-    $projects = versioncontrol_project_get_projects($constraints['nids']);
-    unset($constraints['nids']); // no need to pass this on
+    $projects = versioncontrol_project_get_projects($project_constraints['nids']);
 
     foreach ($projects as $nid => $project) {
       $paths[] = $project['directory'];
@@ -131,13 +72,12 @@ function versioncontrol_project_get_commits($constraints = array()) {
     // In case the caller has also passed a 'paths' constraint, intersect this
     // with the paths determined by the 'nids' constraint so that there is
     // a real 'AND' condition.
-    if (isset($constraints['paths'])) {
-      // TODO: check for the existance and PHP version of array_intersect().
-      $constraints['paths'] = array_intersect($paths, $constraints['paths']);
-    }
+    $constraints['paths'] = isset($constraints['paths']
+                            ? array_intersect($paths, $constraints['paths'])
+                            : $paths;
   }
 
-  return versioncontrol_get_commits($constraints);
+  return $constraints;
 }
 
 
@@ -372,7 +312,8 @@ function versioncontrol_project_set_project($project, $maintainer_uids = array()
 }
 
 /**
- * Delete a given project and its maintainer associations from the database.
+ * Delete all version control data (project information and
+ * maintainer associations) for a given project from the database.
  *
  * @param $project_nid
  *   The node id of the project that should be deleted.
