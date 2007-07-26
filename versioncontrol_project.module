@@ -21,7 +21,9 @@ define('VERSIONCONTROL_PROJECT_APPLICATION_DISABLED',        4);
 define('VERSIONCONTROL_PROJECT_APPLICATION_MIN_PASS_LENGTH', 5);
 
 /**
- * Add project specific constraints to an existing array of commit constraints.
+ * Return a modified version of the given commit constraints that includes
+ * the given project specific constraints in a way that the Version Control API
+ * can understand it.
  *
  * @param $constraints
  *   The constraints array that you already prepared for passing to
@@ -36,13 +38,8 @@ define('VERSIONCONTROL_PROJECT_APPLICATION_MIN_PASS_LENGTH', 5);
  *   'maintainer_uids': An array of Drupal user ids. If given, the result set
  *                      will only contain commits that correspond to one of
  *                      the projects that any of the specified users maintain.
- *
- * @return
- *   A modified $constraints array that includes the additional constraints
- *   from $project_constraints, in a way that the Version Control API can
- *   understand it.
  */
-function versioncontrol_project_alter_commit_constraints($constraints, $project_constraints) {
+function versioncontrol_project_get_commit_constraints($constraints, $project_constraints) {
   if (isset($project_constraints['maintainer_uids'])) {
     $paths = array();
     $projects = versioncontrol_project_get_projects_by_maintainer($project_constraints['maintainer_uids']);
