@@ -235,14 +235,12 @@ function versioncontrol_project_get_projects_by_maintainer($maintainer_uids = NU
 function versioncontrol_project_get_project_for_item($repository, $path) {
   static $projects_for_item = array();
 
-  if (!isset($projects_for_item[$path])) {
+  if (!isset($projects_for_item[$path])) { // not cached, find out now
     $current_path = $path;
 
     // Now, we loop over the path, using the most restrictive path first,
     // and query the DB to find a matching published project node.
-    while ($current_path != dirname($current_path)) {
-      $current_path = dirname($current_path);
-
+    while (TRUE) {
       $result = db_query("SELECT p.nid, p.repo_id, p.directory
                           FROM {versioncontrol_project_projects} p
                            INNER JOIN {node} n ON p.nid = n.nid
@@ -254,6 +252,11 @@ function versioncontrol_project_get_project_for_item($repository, $path) {
       if ($project = db_fetch_array($result)) {
         return $projects_for_item[$path] = $project;
       }
+
+      if ($current_path == dirname($current_path)) {
+        break;
+      }
+      $current_path = dirname($current_path);
     }
 
     // If we didn't find it already, cache the answer as not-found
