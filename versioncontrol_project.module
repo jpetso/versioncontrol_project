@@ -236,13 +236,12 @@ function versioncontrol_project_get_project_for_item($repository, $path) {
   static $projects_for_item = array();
 
   if (!isset($projects_for_item[$path])) {
-    $path_parts = explode('/', $path);
+    $current_path = $path;
 
-    // Now, we loop over the path, using the most restrictive path
-    // first, and query the DB to find a matching published project node.
-    while (!empty($path_parts)) {
-      $project_directory = '/'. implode('/', $path_parts);
-      array_pop($path_parts);
+    // Now, we loop over the path, using the most restrictive path first,
+    // and query the DB to find a matching published project node.
+    while ($current_path != dirname($current_path)) {
+      $current_path = dirname($current_path);
 
       $result = db_query("SELECT p.nid, p.repo_id, p.directory
                           FROM {versioncontrol_project_projects} p
@@ -250,7 +249,7 @@ function versioncontrol_project_get_project_for_item($repository, $path) {
                           WHERE n.status = 1
                            AND p.repo_id = '%d'
                            AND p.directory = '%s'",
-                         $repository['repo_id'], $project_directory);
+                         $repository['repo_id'], $current_path);
 
       if ($project = db_fetch_array($result)) {
         return $projects_for_item[$path] = $project;
