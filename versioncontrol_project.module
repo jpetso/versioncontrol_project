@@ -8,17 +8,449 @@
  * Copyright 2006, 2007 Derek Wright ("dww" , http://drupal.org/user/46549)
  * Copyright 2007 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
-// TODO: hook into nodeapi and catch author changes of project nodes
-//       (for updating the maintainer database),
-//       and project node deletions (for having a delete_project() call)
+// TODO: hook into versioncontrol_account in order to catch account deletions
+//       (for updating the list of maintainers).
 
-// Status values for project applications.
-define('VERSIONCONTROL_PROJECT_APPLICATION_PENDING',         0);
-define('VERSIONCONTROL_PROJECT_APPLICATION_APPROVED',        1);
-define('VERSIONCONTROL_PROJECT_APPLICATION_DECLINED',        2);
-define('VERSIONCONTROL_PROJECT_APPLICATION_QUEUED',          3);
-define('VERSIONCONTROL_PROJECT_APPLICATION_DISABLED',        4);
-define('VERSIONCONTROL_PROJECT_APPLICATION_MIN_PASS_LENGTH', 5);
+
+/**
+ * Implementation of hook_menu().
+ */
+function versioncontrol_project_menu($may_cache) {
+  global $user;
+  $items = array();
+  $admin_access = user_access('administer version control systems');
+
+  if ($may_cache) {
+    $items[] = array(
+      'path' => 'admin/project/versioncontrol-project',
+      'title' => t('Version control / project node integration'),
+      'description' => t('Specify the content types that will be integrated with version control systems, and configure how this will be done.'),
+      'callback' => 'drupal_get_form',
+      'callback arguments' => array('versioncontrol_project_admin'),
+      'access' => $admin_access,
+      'type' => MENU_NORMAL_ITEM,
+    );
+  }
+  else {
+    if (arg(0) == 'node' && is_numeric(arg(1))) {
+      // If a user is viewing a project node that they own (or the user has
+      // the 'administer nodes' permission, add the 'CVS access' tab, but only
+      // if the project is associated with a repository.
+      $node = node_load(arg(1));
+      if (isset($node->versioncontrol_project)
+          && ($node->uid == $user->uid || user_access('administer nodes')))
+      {
+        $repo_id = $node->versioncontrol_project['repo_id'];
+        if ($repo_id > 0 && versioncontrol_is_account_approved($user->uid, $repo_id)) {
+          $items[] = array(
+            'path' => 'node/'. $node->nid .'/commit-access',
+            'title' => t('Commit access'),
+            'callback' => 'drupal_get_form',
+            'callback arguments' => array(
+              'versioncontrol_project_commit_access_form', $node
+            ),
+            'access' => TRUE,
+            'type' => MENU_LOCAL_TASK,
+            'weight' => 4,
+          );
+          if (is_numeric(arg(3))) {
+            $deleted_uid = arg(3);
+            $items[] = array(
+              'path' => 'node/'. $node->nid .'/commit-access/'. $deleted_uid .'/delete',
+              'callback' => 'drupal_get_form',
+              'callback arguments' => array(
+                'versioncontrol_project_commit_access_delete',
+                $node, $deleted_uid,
+              ),
+              'type' => MENU_CALLBACK,
+              'access' => TRUE,
+            );
+          }
+        }
+      }
+    }
+  }
+  return $items;
+}
+
+
+/**
+ * Form callback for 'admin/project/versioncontrol-project':
+ * Global settings for this module.
+ */
+function versioncontrol_project_admin() {
+  $form = array();
+  $repositories = versioncontrol_get_repositories();
+  $repository_options = array();
+
+  foreach ($repositories as $repo_id => $repository) {
+    if (empty($repository_options)) {
+      $first_repo_id = $repo_id;
+    }
+    $repository_options[$repo_id] = $repository['name'];
+  }
+
+  $form['versioncontrol_project_content_types'] = array(
+    '#type' => 'checkboxes',
+    '#title' => t('Project node content types'),
+    '#description' => t('The content types that you specify here will be enhanced with version control capabilities.'),
+    '#default_value' => versioncontrol_project_get_content_types(),
+    '#options' => node_get_types('names'),
+    '#weight' => -20,
+  );
+  // only store checked checkbox keys
+  $form['array_filter'] = array(
+    '#type' => 'value',
+    '#value' => TRUE,
+  );
+
+  return system_settings_form($form);
+}
+
+
+/**
+ * Implementation of hook_nodeapi():
+ * Load the project array into $node->versioncontrol_project if there is
+ * a project for this node, and update/delete the project when the node
+ * is being deleted.
+ */
+function versioncontrol_project_nodeapi(&$node, $op, $arg = NULL) {
+  if (in_array($node->type, versioncontrol_project_get_content_types())) {
+    switch ($op) {
+      case 'load':
+        $project = versioncontrol_project_get_project($node->nid);
+        if (isset($project)) {
+          $node->versioncontrol_project = $project;
+        }
+        return;
+
+      case 'update':
+        if (!isset($node->versioncontrol_project)) {
+          return;
+        }
+        if ($node->uid != $node->versioncontrol_project['owner_uid']) {
+          db_query("UPDATE {versioncontrol_project_projects}
+                    SET owner_uid = '%d'
+                    WHERE nid = '%d'", $node->uid, $node->nid);
+        }
+        return;
+
+      case 'delete':
+        versioncontrol_project_delete_project($node->nid);
+        return;
+
+      default:
+        return;
+    }
+  }
+}
+
+/**
+ * Implementation of hook_form_alter():
+ * Add a fieldset to the add/edit project form where the user can specify
+ * the project's repository and path.
+ */
+function versioncontrol_project_form_alter($form_id, &$form) {
+  if (isset($form['#id']) && $form['#id'] == 'node-form'
+      && in_array($form['#node']->type, versioncontrol_project_get_content_types()))
+  {
+    $node = $form['#node'];
+    $project = isset($node->versioncontrol_project) ? $node->versioncontrol_project : NULL;
+    $accounts = versioncontrol_get_accounts(array('uids' => array($node->uid)));
+
+    // Default setting: no version control integration at all
+    $form['repo_id'] = array(
+      '#type' => 'value',
+      '#value' => 0,
+    );
+
+    // If the user doesn't have commit access to at least one repository,
+    // it makes no sense to present version control integration options.
+    if (empty($accounts)) {
+      return;
+    }
+
+    // Retrieve the possible repository options.
+    $user_repo_ids = array(); // repositories where the user has an account
+    foreach ($accounts as $uid => $usernames_by_repository) {
+      foreach ($usernames_by_repository as $repo_id => $username) {
+        $user_repo_ids[] = $repo_id;
+      }
+    }
+    $repositories = versioncontrol_get_repositories(array('repo_ids' => $user_repo_ids));
+
+    $repository_options = array(0 => t('<none>'));
+    foreach ($repositories as $repo_id => $repository) {
+      if (empty($repository_options)) {
+        $first_repo_id = $repo_id;
+      }
+      $repository_options[$repo_id] = $repository['name'];
+    }
+
+    if (empty($repository_options)) {
+      return;
+    }
+
+    // We're ready to go, add the form elements now.
+    $form['#validate']['versioncontrol_project_form_validate'] = array();
+    $form['#submit']['versioncontrol_project_form_submit'] = array();
+
+    $form['versioncontrol_project'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Version control integration'),
+      '#collapsible' => TRUE,
+      '#collapsed' => isset($project),
+    );
+    $form['versioncontrol_project']['new_repository'] = array(); // currently unused
+    $form['versioncontrol_project']['existing_repository'] = array();
+
+    if (count($repository_options) > 1) {
+      unset($form['repo_id']);
+      $form['versioncontrol_project']['existing_repository']['repo_id'] = array(
+        '#type' => 'select',
+        '#title' => t('Repository'),
+        '#description' => t('The version control repository where this project is located.'),
+        '#default_value' => isset($project) ? $project['repo_id'] : $first_repo_id,
+        '#options' => $repository_options,
+      );
+      $form['versioncontrol_project']['project_directory'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Project directory'),
+        '#description' => t("The project's directory within the selected repository. Directory names should start with a leading slash and must be unique for each project. For example: <code>/modules/foo</code>, <code>/themes/foo</code> or <code>/translations/foo</code>. If there is no repository associated with the project, this setting should be left blank."),
+        '#default_value' => isset($project) ? $project['directory'] : '',
+        '#size' => 40,
+        '#maxlength' => 255,
+      );
+    }
+  }
+}
+
+/**
+ * Validate the add/edit project form before it is submitted.
+ */
+function versioncontrol_project_form_validate($form_id, $form_values) {
+  if (!$form_values['repo_id']) {
+    return;
+  }
+  if (empty($form_values['project_directory'])) {
+    // TODO: validate in a proper way
+  }
+}
+
+/**
+ * Add or update the project data when the add/edit project form is submitted.
+ */
+function versioncontrol_project_form_submit($form_id, $form_values) {
+  if (!$form_values['repo_id']) {
+    versioncontrol_project_delete_project($form_values['nid']);
+  }
+  else {
+    $directory = _versioncontrol_project_remove_trailing_slashes($form_values['project_directory']);
+    $project = array(
+      'nid' => $form_values['nid'],
+      'repo_id' => $form_values['repo_id'],
+      'directory' => $form_values['project_directory'],
+    );
+    versioncontrol_project_set_project($project);
+  }
+}
+
+/**
+ * Make sure the directory starts with, but does not end with a slash.
+ */
+function _versioncontrol_project_remove_trailing_slashes($directory) {
+  if (!empty($directory) && $directory != '/') {
+    $directory = '/'. trim($directory, '/');
+  }
+  return $directory;
+}
+
+
+/**
+ * Form callback for 'node/$nid/commit-access':
+ * Overview / management of project maintainers. This is just the minimal
+ * version, the real form is done in the theming function further down,
+ * as we don't want to drupal_render() the "new user" textfield and the
+ * "Grant access" button at this point already.
+ */
+function versioncontrol_project_commit_access_form($node) {
+  $form = array();
+  $project = $node->versioncontrol_project;
+  $repository = versioncontrol_get_repository($project['repo_id']);
+
+  drupal_set_title(t('Commit access for @title', array('@title' => $node->title)));
+
+  if ($node->type == 'project_project') {
+    project_project_set_breadcrumb($node);
+  }
+
+  $form['nid'] = array(
+    '#type' => 'value',
+    '#value' => $node->nid,
+  );
+  $form['repo_id'] = array(
+    '#type' => 'value',
+    '#value' => $project['repo_id'],
+  );
+  $form['maintainer_uids'] = array(
+    '#type' => 'value',
+    '#value' => implode(',', $project['maintainer_uids']),
+  );
+  // The user id for a new project co-maintainer,
+  // we'll fill this in with a real value during the validation hook.
+  $form['uid'] = array(
+    '#type' => 'hidden',
+    '#value' => 0,
+  );
+
+  $form['introduction'] = array(
+    '#type' => 'markup',
+    '#value' => t(
+      "This page controls commit access for the %title project. Unless otherwise indicated, all users listed in this table have permission to commit and tag files in this project's directory in @repository (%directory). The project owner is listed first and always has full access.", array(
+        '%title' => $node->title,
+        '%directory' => $project['directory'],
+        '@repository' => $repository['name'],
+    )),
+    '#prefix' => '<p>',
+    '#suffix' => '</p>',
+  );
+
+  // The actual table is created inside the '#after_build' function.
+  $form['table'] = array(
+    '#type' => 'markup',
+    '#value' => '',
+    '#node' => $node, // remember that one for the '#after_build' function
+    '#after_build' => array('versioncontrol_project_commit_access_table'),
+  );
+  $form['table']['username'] = array(
+    '#type' => 'textfield',
+    //'#required' => TRUE, // already checked by the validation hook
+    '#size' => 30,
+    '#maxlength' => 60,
+    '#autocomplete_path' => 'versioncontrol/user/autocomplete/'. $project['repo_id'],
+  );
+  $form['table']['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Grant access'),
+  );
+
+  return $form;
+}
+
+/**
+ * The maintainers table for the above commit access form,
+ * constructed by means of an '#after_build' callback function.
+ */
+function versioncontrol_project_commit_access_table(&$form, $form_values) {
+  $node = $form['#node'];
+  $project = $node->versioncontrol_project;
+
+  $rows = array();
+  $header = array();
+  $header[] = array('data' => t('Drupal username'), 'field' => 'name');
+  $header[] = array('data' => t('Actions'));
+
+  // The owner of the node automatically gets commit access, list this
+  // user as the first row in the table, and don't allow any operations.
+  $rows[] = array(
+    theme('username', $node), // theme_username() only needs ->uid and ->name.
+    '<span class="disabled">'. t('locked') .'</span>'
+  );
+
+  // ...and now the co-maintainers...
+  foreach ($project['comaintainer_uids'] as $uid) {
+    $user = user_load(array('uid' => $uid));
+    if (!$user) {
+      continue; // safety check, should not happen
+    }
+
+    // Indicate any maintainers whose account is no longer approved.
+    if (!versioncontrol_is_account_approved($uid, $project['repo_id'])) {
+      $username = '<del>'. theme('username', $user) .'</del> <em>('. t('repository access disabled') .')</em>';
+    }
+    else {
+      $username = theme('username', $user);
+    }
+    $rows[] = array($username, l(
+      t('Delete'), 'node/'. $node->nid .'/commit-access/'. $uid .'/delete'
+    ));
+  }
+
+  // The "new user" and "Grant access" controls from the original form.
+  $rows[] = array(drupal_render($form['username']), drupal_render($form['submit']));
+
+  // The table is done, rejoice.
+  $form['#value'] = theme('table', $header, $rows);
+
+  return $form;
+}
+
+/**
+ * The validation hook for the commit access form:
+ * check the validity of the new project maintainer that should be added.
+ */
+function versioncontrol_project_commit_access_form_validate($form_id, $form_values, $form) {
+  $username = $form_values['username'];
+  $repo_id = $form_values['repo_id'];
+  $maintainer_uids = explode(',', $form_values['maintainer_uids']);
+
+  if (empty($username)) {
+    form_set_error('username', t('You must specify a valid user name.'));
+    return;
+  }
+
+  $result = db_fetch_object(db_query("SELECT name, uid FROM {users}
+                                      WHERE name = '%s'", $username));
+
+  if (!isset($result)) {
+    form_set_error('username', t('%user is not a valid user on this site.', array('%user' => $username)), 'error');
+    return;
+  }
+
+  $uid = $result->uid;
+  $vcs_username = versioncontrol_get_account_username_for_uid($uid, $repo_id);
+
+  if (!isset($vcs_username)) {
+    $repository = versioncontrol_get_repository($repo_id);
+    form_set_error('username', t('%user does not have an account in @repository.', array('%user' => $username, '@repository' => $repository['name'])), 'error');
+    return;
+  }
+  if (in_array($uid, $maintainer_uids)) {
+    form_set_error('username', t('%user already has commit access for this project.', array('%user' => $username)), 'error');
+    return;
+  }
+
+  // save the uid in the form so we don't have to look it up again in
+  // submit(). we also stash user, since it's not set directly when
+  // using the special theme function to generate the form.
+  form_set_value($form['uid'], $uid);
+}
+
+/**
+ * The submit hook for the commit access form: add a new project maintainer.
+ */
+function versioncontrol_project_commit_access_form_submit($form_id, $form_values) {
+  $nid = $form_values['nid'];
+  $uid = $form_values['uid'];
+  db_query("INSERT INTO {versioncontrol_project_comaintainers} (nid, uid)
+            VALUES (%d, %d)", $nid, $uid);
+
+  $user = new stdClass();
+  $user->uid = $form_values['uid'];
+  $user->name = $form_values['username'];
+  drupal_set_message(t('Commit access has been granted to !user.', array(
+    '!user' => theme('username', $user),
+  )));
+}
+
+
+
+/**
+ * Return all content types that are marked as "project node" types.
+ */
+function versioncontrol_project_get_content_types() {
+  return variable_get('versioncontrol_project_content_types', array());
+}
 
 /**
  * Return a modified version of the given commit constraints that includes
@@ -42,25 +474,27 @@ define('VERSIONCONTROL_PROJECT_APPLICATION_MIN_PASS_LENGTH', 5);
 function versioncontrol_project_get_commit_constraints($constraints, $project_constraints) {
   if (isset($project_constraints['maintainer_uids'])) {
     $paths = array();
-    $projects = versioncontrol_project_get_projects_by_maintainer($project_constraints['maintainer_uids']);
+    $projects = versioncontrol_project_get_projects(array(
+      'maintainer_uids' => $project_constraints['maintainer_uids'],
+    ));
 
-    foreach ($projects as $maintainer_uid => $value) {
-      foreach ($value as $nid => $project) {
-        $paths[] = $project->directory;
-      }
+    foreach ($projects as $nid => $project) {
+      $paths[] = $project->directory;
     }
 
     // In case the caller has also passed a 'paths' constraint, intersect this
     // with the paths determined by the 'maintainer_uid' constraint
     // so that there is a real 'AND' condition.
-    $constraints['paths'] = isset($constraints['paths']
+    $constraints['paths'] = isset($constraints['paths'])
                             ? array_intersect($paths, $constraints['paths'])
                             : $paths;
   }
 
   if (isset($project_constraints['nids'])) {
     $paths = array();
-    $projects = versioncontrol_project_get_projects($project_constraints['nids']);
+    $projects = versioncontrol_project_get_projects(array(
+      'nids' => $project_constraints['nids'],
+    ));
 
     foreach ($projects as $nid => $project) {
       $paths[] = $project['directory'];
@@ -69,7 +503,7 @@ function versioncontrol_project_get_commit_constraints($constraints, $project_co
     // In case the caller has also passed a 'paths' constraint, intersect this
     // with the paths determined by the 'nids' constraint so that there is
     // a real 'AND' condition.
-    $constraints['paths'] = isset($constraints['paths']
+    $constraints['paths'] = isset($constraints['paths'])
                             ? array_intersect($paths, $constraints['paths'])
                             : $paths;
   }
@@ -79,139 +513,165 @@ function versioncontrol_project_get_commit_constraints($constraints, $project_co
 
 
 /**
- * Retrieve a list of all maintainers for each of the given project nodes.
- *
- * @param $project_nids
- *   An array of node ids for which the maintainers should be retrieved.
+ * Convenience function to retrieve one single project by project node id.
  *
  * @return
- *   An array containing an nid / maintainer uid mapping that looks like
- *   array($nid => array($uid1, uid2, ...), ...). If no maintainers
- *   can be found for the given nodes, an empty array is returned.
+ *   The project array for the given project node,
+ *   which consists of the following elements:
+ *
+ *   'nid': The node id of the project node.
+ *   'owner_uid': The Drupal user id of the project owner.
+ *   'repo_id': The repository id of the repository where the project resides.
+ *   'directory': The project directory inside the repository.
+ *   'maintainer_uids': An array containing all maintainer uids, that is,
+ *                      the project owner and the co-maintainers.
+ *   'comaintainer_uids': An array containing all co-maintainer uids.
+ *
+ *   If there is no version control data for that node, NULL is returned.
  */
-function versioncontrol_project_get_maintainers($project_nids) {
-  $nid_constraints = array();
-  foreach ($project_nids as $nid) {
-    $nid_constraints[] = "nid = '%d'";
+function versioncontrol_project_get_project($nid) {
+  $projects = versioncontrol_project_get_projects(array('nids' => array($nid)));
+  foreach ($projects as $nid => $project) {
+    return $project;
   }
+  return NULL;
+}
+
+/**
+ * Convenience function to retrieve a set of projects by maintainer uid.
+ *
+ * @return
+ *   An array of projects with the project node id as key, where each element
+ *   is again a structured array that consists of the following elements:
+ *
+ *   'nid': The node id of the project node.
+ *   'owner_uid': The Drupal user id of the project owner.
+ *   'repo_id': The repository id of the repository where the project resides.
+ *   'directory': The project directory inside the repository.
+ *   'maintainer_uids': An array containing all maintainer uids, that is,
+ *                      the project owner and the co-maintainers.
+ *   'comaintainer_uids': An array containing all co-maintainer uids.
+ *
+ *   If the given user doesn't maintain at least one project,
+ *   an empty array is returned.
+ */
+function versioncontrol_project_get_projects_for_maintainer($uid) {
+  return versioncontrol_project_get_projects(array('maintainer_uids' => array($uid)));
+}
+
+/**
+ * Retrieve a set of projects that match the given constraints.
+ *
+ * @param $constraints
+ *   An optional array of constraints. Possible array elements are:
+ *
+ *   'nids': An array of project node ids. If given, only the corresponding
+ *           projects will be returned.
+ *   'owner_uids': An array of Drupal user ids. If given, only projects with
+ *                 one of these users as project owner will be returned.
+ *   'maintainer_uids': An array of Drupal user ids. If given, only projects
+ *                      with at least one of these users as maintainer
+ *                      will be returned.
+ *
+ * @return
+ *   An array of projects with the project node id as key, where each element
+ *   is again a structured array that consists of the following elements:
+ *
+ *   'nid': The node id of the project node.
+ *   'owner_uid': The Drupal user id of the project owner.
+ *   'repo_id': The repository id of the repository where the project resides.
+ *   'directory': The project directory inside the repository.
+ *   'maintainer_uids': An array containing all maintainer uids, that is,
+ *                      the project owner and the co-maintainers.
+ *   'comaintainer_uids': An array containing all co-maintainer uids.
+ *
+ *   If not a single project matches these constraints,
+ *   an empty array is returned.
+ */
+function versioncontrol_project_get_projects($constraints = array()) {
+  $and_constraints = array('p.nid > 0');
+  $params = array();
+  $maintainer_join = '';
+
+  // project node constraints
+  if (isset($constraints['nids'])) {
+    $or_constraints = array();
+    foreach ($constraints['nids'] as $nid) {
+      $or_constraints[] = "p.nid = '%d'";
+      $params[] = $nid;
+    }
+    $and_constraints[] = implode(' OR ', $or_constraints);
+  }
+
+  if (isset($constraints['owner_uids'])) {
+    foreach ($constraints['maintainer_uids'] as $uid) {
+      if (in_array($uid_constraint, $maintainer_uids)) {
+        $or_constraints[] = "p.owner_uid = '%d'";
+        $params[] = $uid;
+      }
+    }
+    $and_constraints[] = implode(' OR ', $or_constraints);
+  }
+
+  if (isset($constraints['maintainer_uids'])) {
+
+    $maintainer_join = ' INNER JOIN {versioncontrol_project_comaintainers} c
+                         ON p.nid = c.nid';
+
+    foreach ($constraints['maintainer_uids'] as $uid) {
+      $or_constraints[] = "p.owner_uid = '%d'";
+      $params[] = $uid;
+      $or_constraints[] = "c.uid = '%d'";
+      $params[] = $uid;
+    }
+    $and_constraints[] = implode(' OR ', $or_constraints);
+  }
+
+  $where = empty($and_constraints) ? '' : ' WHERE '. implode(' AND ', $and_constraints);
+
+  $result = db_query('SELECT DISTINCT(p.nid), p.owner_uid, p.repo_id, p.directory
+                      FROM {versioncontrol_project_projects} p'.
+                      $maintainer_join . $where, $params);
+
+  $projects = array();
+  while ($project = db_fetch_object($result)) {
+    $comaintainers = _versioncontrol_project_get_comaintainers($project->nid);
+
+    $projects[$project->nid] = array(
+      'nid'             => $project->nid,
+      'owner_uid'       => $project->owner_uid,
+      'repo_id'         => $project->repo_id,
+      'directory'       => $project->directory,
+      'maintainer_uids' => array_merge(
+        array($project->owner_uid), $comaintainers
+      ),
+      'comaintainer_uids' => $comaintainers,
+    );
+  }
+  return $projects;
+}
+
+/**
+ * Retrieve the list of all maintainers for the given project.
+ *
+ * @param $nid
+ *   The node id of the project node for which the maintainers#
+ *   should be retrieved.
+ *
+ * @return
+ *   An array of maintainer uids for the given project. There is at least
+ *   one maintainer for each project (the node owner).
+ */
+function _versioncontrol_project_get_comaintainers($nid) {
+  $result = db_query("SELECT uid
+                      FROM {versioncontrol_project_comaintainers} c
+                      WHERE nid = '%d'", $nid);
 
   $maintainers = array();
-  $result = db_query('SELECT * FROM {versioncontrol_project_maintainers}
-                      WHERE '. implode(' OR ', $nid_constraints), $project_nids);
-
-  while ($mapping = db_fetch_object($result)) {
-    if (!isset($maintainers[$mapping->nid])) {
-      $maintainers[$mapping->nid] = array();
-    }
-    $maintainers[$mapping->nid][] = $mapping->uid;
+  while ($maintainer = db_fetch_object($result)) {
+    $maintainers[] = $maintainer->uid;
   }
   return $maintainers;
-}
-
-
-/**
- * Retrieve a list of all projects for each of the given node ids, including
- * detailed project data for all of the found projects. If no list of node ids
- * is given, all existing projects will be retrieved.
- *
- * @param $project_nids
- *   An array of project node ids for which the project information
- *   should be retrieved, or NULL for all existing projects.
- *
- * @return
- *   An array of mappings between nid and project data that looks like
- *     array(
- *       $nid => array(
- *         'nid' => $nid,
- *         'repo_id' => $repo_id,
- *         'directory' => $project_directory,
- *       ),
- *       ...
- *     ).
- *   Node ids for nodes without an assigned project are discarded and
- *   don't appear in the result value. If no projects can be found,
- *   an empty array is returned.
- */
-function versioncontrol_project_get_projects($project_nids = NULL) {
-  if (isset($project_nids)) {
-    $nid_constraints = array();
-    foreach ($project_nids as $nid) {
-      $nid_constraints[] = "nid = '%d'";
-    }
-    $result = db_query('SELECT * FROM {versioncontrol_project_projects}
-                        WHERE '. implode(' OR ', $nid_constraints), $project_nids);
-  }
-  else {
-    $result = db_query('SELECT * FROM {versioncontrol_project_projects}');
-  }
-
-  $projects = array();
-  while ($project = db_fetch_array($result)) {
-    $projects[$project['nid']] = $project;
-  }
-  return $projects;
-}
-
-
-/**
- * Retrieve a list of all projects for each of the given Drupal uids
- * where the corresponding user is marked as maintainer of the project node,
- * including detailed project data for all of the found projects.
- * If no list of node ids is given, all existing maintainer/project mappings
- * will be retrieved.
- *
- * @param $maintainer_uids
- *   An array of Drupal uids for which the maintained projects should be
- *   retrieved, or NULL for all existing maintainer/project mappings.
- *
- * @return
- *   An array of mappings between maintainer uid and project data that looks like
- *     array(
- *       $uid => array(
- *         $nid => array(
- *           'nid' => $nid,
- *           'repo_id' => $repo_id,
- *           'directory' => $project_directory,
- *         ),
- *         ...
- *       ),
- *       ...
- *     ).
- *   uids for users without maintainership of any project are discarded and
- *   don't appear in the result value. If no projects can be found,
- *   an empty array is returned.
- */
-function versioncontrol_project_get_projects_by_maintainer($maintainer_uids = NULL) {
-  if (isset($maintainer_uids)) {
-    $uid_constraints = array();
-    foreach ($maintainer_uids as $uid) {
-      $uid_constraints[] = "m.uid = '%d'";
-    }
-
-    $result = db_query('SELECT m.mid, p.*
-                        FROM {versioncontrol_project_maintainers} m
-                         AND {versioncontrol_project_projects} p
-                        WHERE ('. implode(' OR ', $uid_constraints) .')
-                         AND m.nid = p.nid', $maintainer_uids);
-  }
-  else {
-    $result = db_query('SELECT m.mid, p.*
-                        FROM {versioncontrol_project_maintainers} m
-                         AND {versioncontrol_project_projects} p
-                        WHERE m.nid = p.nid');
-  }
-
-  $projects = array();
-  while ($project = db_fetch_array($result)) {
-    $uid = $project['uid'];
-    unset($project['uid']);
-
-    if (!isset($projects[$uid])) {
-      $projects[$uid] = array();
-    }
-    $projects[$uid][$project['nid']] = $project;
-  }
-  return $projects;
 }
 
 
@@ -224,37 +684,56 @@ function versioncontrol_project_get_projects_by_maintainer($maintainer_uids = NU
  *   The path of the item.
  *
  * @return
- *   A structured array with project data that looks like
- *     array(
- *       'nid' => $nid,
- *       'repo_id' => $repo_id,
- *       'directory' => $project_directory,
- *     ),
- *   or NULL if the item doesn't belong to any project.
+ *   The project array of the project that contains the item.
+ *   It consists of the following elements:
+ *
+ *   'nid': The node id of the project node.
+ *   'owner_uid': The Drupal user id of the project owner.
+ *   'repo_id': The repository id of the repository where the project resides.
+ *   'directory': The project directory inside the repository.
+ *   'maintainer_uids': An array containing all maintainer uids, that is,
+ *                      the project owner and the co-maintainers.
+ *   'comaintainer_uids': An array containing all co-maintainer uids.
+ *
+ *   If the item doesn't belong to any project, NULL is returned.
  */
 function versioncontrol_project_get_project_for_item($repository, $path) {
+  return _versioncontrol_project_get_project_for_item($repository['repo_id'], $path);
+}
+
+function _versioncontrol_project_get_project_for_item($repo_id, $path) {
   static $projects_for_item = array();
 
   if (!isset($projects_for_item[$path])) { // not cached, find out now
     $current_path = $path;
 
     // Now, we loop over the path, using the most restrictive path first,
-    // and query the DB to find a matching published project node.
+    // and query the database to find a matching published project node.
     while (TRUE) {
-      $result = db_query("SELECT p.nid, p.repo_id, p.directory
+      $result = db_query("SELECT p.nid, p.owner_uid, p.repo_id, p.directory
                           FROM {versioncontrol_project_projects} p
-                           INNER JOIN {node} n ON p.nid = n.nid
-                          WHERE n.status = 1
-                           AND p.repo_id = '%d'
-                           AND p.directory = '%s'",
-                         $repository['repo_id'], $current_path);
+                          WHERE p.nid > 0
+                           AND p.repo_id = '%d' AND p.directory = '%s'",
+                          $repo_id, $current_path);
 
-      if ($project = db_fetch_array($result)) {
-        return $projects_for_item[$path] = $project;
+      if ($project = db_fetch_object($result)) {
+        $comaintainers = _versioncontrol_project_get_comaintainers($project->nid);
+
+        $projects_for_item[$path] = array(
+          'nid'             => $project->nid,
+          'owner_uid'       => $project->owner_uid,
+          'repo_id'         => $project->repo_id,
+          'directory'       => $project->directory,
+          'maintainer_uids' => array_merge(
+            array($project->owner_uid), $comaintainers
+          ),
+          'comaintainer_uids' => $comaintainers,
+        );
+        return $projects_for_item[$path];
       }
 
       if ($current_path == dirname($current_path)) {
-        break;
+        break; // stop at the top-level directory
       }
       $current_path = dirname($current_path);
     }
@@ -272,119 +751,95 @@ function versioncontrol_project_get_project_for_item($repository, $path) {
  * project directory as the given one already exists.
  *
  * @param $project
- *   A structured array with project data that looks like
- *     array(
- *       'nid' => $nid,
- *       'repo_id' => $repo_id,
- *       'directory' => $project_directory,
- *     ).
- * @param $maintainer_uids
- *   An array of Drupal uids specifying the project maintainers. The node owner
- *   will always have maintainer status, even if not included in the uid list.
+ *   The project array containing the new or existing repository.
+ *   In comparison to standard project arrays, the 'owner uid' and
+ *   'maintainer uids' elements are disregarded, so it only needs to contain
+ *   the following elements:
+ *
+ *   'nid': The node id of the project node.
+ *   'repo_id': The repository id of the repository where the project resides.
+ *   'directory': The project directory inside the repository.
+ *   'comaintainer_uids': Optional. If given, the list of co-maintainer uids
+ *                        will be updated with this one.
  *
  * @return
- *   TRUE if the project was added or updated successfully, or FALSE if
- *   the operation didn't succeed.
+ *   TRUE if the project could be created, or FALSE if not.
  */
-function versioncontrol_project_set_project($project, $maintainer_uids = array()) {
+function versioncontrol_project_set_project($project) {
+  if ($project['repo_id'] == 0) { // "don't use version control integration"
+    db_query("DELETE FROM {versioncontrol_project_comaintainers}
+              WHERE nid = '%d'", $project['nid']);
+    db_query("INSERT INTO {versioncontrol_project_projects}
+              (nid, owner_uid, repo_id, directory)
+              VALUES ('%d', '%d', '%d', '%s')",
+              $project['nid'], 0, 0, '');
+  }
   // Don't do this if another project with the same directory already exists.
-  $existing_project = versioncontrol_project_get_project_for_item($project->directory);
+  $repository = versioncontrol_get_repository($project['repo_id']);
+  $existing_project = versioncontrol_project_get_project_for_item(
+    $repository, $project['directory']
+  );
   if (isset($existing_project) && $existing_project['nid'] != $project['nid']) {
     return FALSE;
   }
 
   // Get the project node, so we can determine the node owner.
-  $node = node_load($project->nid);
+  $node = node_load($project['nid']);
   if (!isset($node->nid)) { // the node doesn't exist
     return FALSE;
   }
 
-  // If the entry already exists, delete it
-  _versioncontrol_project_delete_project($project->nid);
+  // If the entry already exists, delete it.
+  db_query("DELETE FROM {versioncontrol_project_projects}
+            WHERE nid = '%d'", $node->nid);
 
   db_query("INSERT INTO {versioncontrol_project_projects}
-            VALUES ('%d', '%d', '%s')",
-           $project->nid, $project->repo_id, $project->directory);
+            (nid, owner_uid, repo_id, directory)
+            VALUES ('%d', '%d', '%d', '%s')",
+            $node->nid, $node->uid,
+            $project['repo_id'], $project['directory']);
 
-  _versioncontrol_project_add_maintainers($project->nid, $node->uid, $maintainer_uids);
+  if (isset($project['comaintainer_uids'])) {
+    // Delete the list, so we can easily insert them.
+    db_query("DELETE FROM {versioncontrol_project_comaintainers}
+              WHERE nid = '%d'", $node->nid);
+
+    // Insert each comaintainer into the database.
+    foreach ($project['comaintainer_uids'] as $uid) {
+      if ($uid == $node->uid) {
+        continue; // the owner is not a co-maintainer
+      }
+      db_query("INSERT INTO {versioncontrol_project_comaintainers} (nid, uid)
+                VALUES ('%d', '%d')", $node->nid, $uid);
+    }
+  }
+
+  // Insertion hooks, if any, will go here. (Remember to add the owner and
+  // maintainer uids to the project array if you provide a hook.)
+
   return TRUE;
 }
 
 /**
  * Delete all version control data (project information and
  * maintainer associations) for a given project from the database.
+ * If no project with this node id exists, nothing will be done.
  *
- * @param $project_nid
- *   The node id of the project that should be deleted.
+ * @param $nid
+ *   The node id of the project node whose version control data
+ *   should be deleted.
  */
-function versioncontrol_project_delete_project($project_nid) {
+function versioncontrol_project_delete_project($nid) {
+  $count = db_result(db_query("SELECT COUNT(*) FROM {versioncontrol_project_projects}
+                               WHERE nid = '%d'", $nid));
+  if (!$count) {
+    return; // nothing to delete
+  }
+
   // Deletion hooks, if any, will go here.
-  _versioncontrol_project_delete_project($project_nid);
-}
 
-function _versioncontrol_project_delete_project($project_nid) {
-  db_result(db_query("DELETE FROM {versioncontrol_project_projects}
-                      WHERE nid = '%d'", $project_nid));
-  db_result(db_query("DELETE FROM {versioncontrol_project_maintainers}
-                      WHERE nid = '%d'", $project_nid));
-}
-
-
-/**
- * Assign one or more maintainers for the given project node. Any previously
- * existing maintainer entries will be replaced by the new set of maintainers.
- * This operation will fail if the given project node doesn't exist or has
- * no project assigned.
- *
- * @param $project_nid
- *   The node id of the project node.
- * @param $maintainer_uids
- *   An array of Drupal uids specifying the project maintainers. The node owner
- *   will always have maintainer status, even if not included in the uid list.
- *
- * @return
- *   TRUE if the maintainers were added or updated successfully, or FALSE if
- *   the operation didn't succeed.
- */
-function versioncontrol_project_set_maintainers($project_nid, $maintainer_uids) {
-  // Don't do this if there is no corresponding project entry.
-  $count = db_result(db_query("SELECT COUNT(*)
-                               FROM {versioncontrol_project_projects}
-                               WHERE nid = '%d'", $project_nid));
-  if ($count == 0) {
-    return FALSE;
-  }
-
-  // Get the project node, so we can determine the node owner.
-  $node = node_load($project_nid);
-  if (!isset($node->nid)) { // the node doesn't exist
-    return FALSE;
-  }
-
-  db_query("DELETE FROM {versioncontrol_project_maintainers}
-            WHERE nid = '%d'", $project_nid);
-  _versioncontrol_project_add_maintainers($project->nid, $node->uid, $maintainer_uids);
-  return TRUE;
-}
-
-/**
- * Insert maintainer entries for the given project node into the database.
- *
- * @param $project_nid
- *   The node id of the project node.
- * @param $node_owner_uid
- *   The user id of the owner of the project node.
- * @param $maintainer_uids
- *   An array of Drupal uids specifying the project maintainers. The node owner
- *   will always be registered as maintainer, even if not included in this list.
- */
-function _versioncontrol_project_add_maintainers($project_nid, $node_owner_uid, $maintainer_uids) {
-  // always include the node owner as project maintainer
-  if (!in_array($node_owner_uid, $maintainer_uids)) {
-    $maintainer_uids[] = $node_owner_uid;
-  }
-  foreach ($maintainer_uids as $uid) {
-    db_query("INSERT INTO {versioncontrol_project_maintainers}
-              VALUES ('%d', '%d')", $project_nid, $uid);
-  }
+  db_query("DELETE FROM {versioncontrol_project_projects}
+            WHERE nid = '%d'", $nid);
+  db_query("DELETE FROM {versioncontrol_project_comaintainers}
+            WHERE nid = '%d'", $nid);
 }
