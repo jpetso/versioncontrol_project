@@ -53,13 +53,13 @@ function versioncontrol_project_menu($may_cache) {
             'type' => MENU_LOCAL_TASK,
             'weight' => 4,
           );
-          if (is_numeric(arg(3))) {
+          if (is_numeric(arg(3)) && in_array(arg(3), $node->versioncontrol_project['comaintainer_uids'])) {
             $deleted_uid = arg(3);
             $items[] = array(
               'path' => 'node/'. $node->nid .'/commit-access/'. $deleted_uid .'/delete',
               'callback' => 'drupal_get_form',
               'callback arguments' => array(
-                'versioncontrol_project_commit_access_delete',
+                'versioncontrol_project_commit_access_delete_confirm',
                 $node, $deleted_uid,
               ),
               'type' => MENU_CALLBACK,
@@ -87,7 +87,7 @@ function versioncontrol_project_admin() {
     if (empty($repository_options)) {
       $first_repo_id = $repo_id;
     }
-    $repository_options[$repo_id] = $repository['name'];
+    $repository_options[$repo_id] = check_plain($repository['name']);
   }
 
   $form['versioncontrol_project_content_types'] = array(
@@ -184,7 +184,7 @@ function versioncontrol_project_form_alter($form_id, &$form) {
       if (empty($repository_options)) {
         $first_repo_id = $repo_id;
       }
-      $repository_options[$repo_id] = $repository['name'];
+      $repository_options[$repo_id] = check_plain($repository['name']);
     }
 
     if (empty($repository_options)) {
@@ -229,11 +229,81 @@ function versioncontrol_project_form_alter($form_id, &$form) {
  * Validate the add/edit project form before it is submitted.
  */
 function versioncontrol_project_form_validate($form_id, $form_values) {
-  if (!$form_values['repo_id']) {
+  $repo_id = $form_values['repo_id'];
+  $admin_access = user_access('administer version control systems');
+  $project = versioncontrol_project_get_project($form_values['nid']);
+
+  if (!$admin_access && isset($project) && $repo_id != $project['repo_id']) {
+    form_set_error('repo_id', t('You do not have permission to modify the CVS repository for this project. (The repository can\'t be changed after the project has been created.)'));
+    return;
+  }
+  if (!$repo_id) {
+    // no version control integration, we don't have to validate
+    return;
+  }
+
+  $repository = versioncontrol_get_repository($repo_id);
+
+  if (!isset($repository)) {
+    form_set_error('repo_id', t('You must select a valid repository.'));
     return;
   }
   if (empty($form_values['project_directory'])) {
-    // TODO: validate in a proper way
+    form_set_error('project_directory', t('You can not specify a directory if there is no repository for this project.'));
+    return;
+  }
+
+  $directory = _versioncontrol_project_remove_trailing_slashes($form_values['project_directory']);
+
+  if (!preg_match('/^[a-zA-Z0-9\/_-]+$/', $directory)) {
+    form_set_error('project_directory', t("The path of the project directory can only contain letters, numbers, slashes ('/'), hyphens ('-') and underscores ('_')."));
+    return;
+  }
+
+  // Don't do this if another project with the same directory already exists.
+  $existing_project = versioncontrol_project_get_project_for_item($repository, $directory);
+  if (isset($existing_project) && $existing_project['nid'] != $form_values['nid']) {
+    form_set_error('project_directory', t('The specified project directory conflicts with that of an existing project.'));
+    return;
+  }
+
+  // I think this one is very drupal.org specific (if needed at all?), isn't
+  // generic enough even for CVS repositories, and shouldn't be in here.
+  // TODO: Replace this with an array of allowed root directories which are
+  // then checked with case sensitiveness.
+  /*if (variable_get('versioncontrol_project_dir_validate_root_by_case', 1)) {
+    if ($path_elements[1] != drupal_strtolower($path_elements[1])) {
+      form_set_error('project_directory', t("The root of the project directory (%root) must be lowercase.", array('%root' => $path_elements[1])));
+      return;
+    }
+  }*/
+
+  // project.module specific. Not the most ideal place for these checks,
+  // but what the hell, it doesn't hurt nobody.
+  if (module_exists('project')) {
+    if (project_use_taxonomy() && variable_get('versioncontrol_project_dir_validate_by_type', 1)) {
+      $node = node_load($form_values['nid']);
+      $project_type_tid = $node->project_type;
+      $tree = taxonomy_get_term($project_type_tid);
+
+      $directory_with_slash = ($directory == '/') ? '/' : $directory .'/';
+      $dir_root = variable_get('versioncontrol_project_directory_tid_'. $project_type_tid, '/');
+      if ($dir_root[strlen($dir_root)-1] != '/') {
+        $dir_root .= '/';
+      }
+      if (strpos($directory_with_slash, $dir_root) !== FALSE) {
+        form_set_error('project_directory', t("The root of the project directory does not match the selected project type (%type). By default, spaces in the type name are converted to hyphens in the path, but custom mappings can also be defined.  Given the current project type, the first element of the directory path should be: %goal.", array('%type' => $tree->name, '%goal' => $dir_root)));
+        return;
+      }
+    }
+
+    if (variable_get('versioncontrol_project_validate_by_short_name', 1)) {
+      $last_element = array_pop(explode('/', $directory));
+      if ($last_element != $form_values['uri']) {
+        form_set_error('project_directory', t("The last part of the project directory (%last) does not match the short project name (%short).", array('%last' => $last_element, '%short' => $form_values['uri'])));
+        return;
+      }
+    }
   }
 }
 
@@ -259,6 +329,7 @@ function versioncontrol_project_form_submit($form_id, $form_values) {
  * Make sure the directory starts with, but does not end with a slash.
  */
 function _versioncontrol_project_remove_trailing_slashes($directory) {
+  $directory = trim($directory); // remove whitespace
   if (!empty($directory) && $directory != '/') {
     $directory = '/'. trim($directory, '/');
   }
@@ -443,6 +514,66 @@ function versioncontrol_project_commit_access_form_submit($form_id, $form_values
   )));
 }
 
+/**
+ * Form callback for 'node/$nid/commit-access/$uid/delete':
+ * Provide a form to confirm deletion of a user's commit access.
+ */
+function versioncontrol_project_commit_access_delete_confirm($node, $uid) {
+  $form = array();
+  $project = $node->versioncontrol_project;
+
+  if ($node->type == 'project_project') {
+    project_project_set_breadcrumb($node, array(l($node->title, 'node/'. $node->nid)));
+  }
+
+  if ($uid == $node->uid) {
+    drupal_set_title(t('User is locked'));
+    $form['nodelete'] = array(
+      '#type' => 'markup',
+      '#value' => t('You cannot delete commit access for !user because this user is the owner of the project.',
+                    array('!user' => theme('username', $node))),
+    );
+    return $form;
+  }
+
+  $user = user_load(array('uid' => $uid));
+
+  if (!in_array($uid, $project['comaintainer_uids'])) {
+    drupal_set_title(t('User is not a maintainer'));
+    $form['nodelete'] = array(
+      '#type' => 'markup',
+      '#value' => t('!user does not have commit access so you cannot delete that.',
+                    array('!user' => theme('username', $user))),
+    );
+    return $form;
+  }
+
+  $form['nid'] = array('#type' => 'value', '#value' => $node->nid);
+  $form['uid'] = array('#type' => 'value', '#value' => $uid);
+
+  return confirm_form($form,
+    t('Are you sure you want to delete commit access for !user?',
+      array('!user' => theme('username', $user))),
+    'node/'. $node->nid .'/commit-access',
+    t('This action cannot be undone.'),
+    t('Delete'),
+    t('Cancel')
+  );
+}
+
+/**
+ * Delete the repository when the confirmation form is submitted.
+ */
+function versioncontrol_project_commit_access_delete_confirm_submit($form_id, $form_values) {
+  $nid = $form_values['nid'];
+  $uid = $form_values['uid'];
+  $user = user_load(array('uid' => $uid));
+  db_query("DELETE FROM {versioncontrol_project_comaintainers}
+            WHERE nid = '%d' AND uid = '%d'", $nid, $uid);
+  drupal_set_message(t('Commit access for !user has been deleted.', array('!user' => theme('username', $user))));
+  return 'node/'. $nid .'/commit-access';
+}
+
 
 
 /**
@@ -614,7 +745,6 @@ function versioncontrol_project_get_projects($constraints = array()) {
   }
 
   if (isset($constraints['maintainer_uids'])) {
-
     $maintainer_join = ' INNER JOIN {versioncontrol_project_comaintainers} c
                          ON p.nid = c.nid';
 
@@ -747,8 +877,7 @@ function _versioncontrol_project_get_project_for_item($repo_id, $path) {
 
 /**
  * Add or update a project. This operation will fail if the given project's nid
- * doesn't correspond to an existing node, or if another project with the same
- * project directory as the given one already exists.
+ * doesn't correspond to an existing node.
  *
  * @param $project
  *   The project array containing the new or existing repository.
@@ -773,14 +902,6 @@ function versioncontrol_project_set_project($project) {
               (nid, owner_uid, repo_id, directory)
               VALUES ('%d', '%d', '%d', '%s')",
               $project['nid'], 0, 0, '');
-  }
-  // Don't do this if another project with the same directory already exists.
-  $repository = versioncontrol_get_repository($project['repo_id']);
-  $existing_project = versioncontrol_project_get_project_for_item(
-    $repository, $project['directory']
-  );
-  if (isset($existing_project) && $existing_project['nid'] != $project['nid']) {
-    return FALSE;
   }
 
   // Get the project node, so we can determine the node owner.
