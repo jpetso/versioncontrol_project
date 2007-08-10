@@ -997,11 +997,13 @@ function versioncontrol_project_delete_project($nid) {
  *   A commit array of the commit that is about to happen. As it's not
  *   committed yet, it's not yet in the database as well, which means that
  *   any commit info retrieval functions won't work on this commit array.
- *   It also means there's no 'commit_id' and 'date' elements as in
- *   regular commit arrays.
+ *   It also means there's no 'commit_id', 'revision' and 'date' elements like
+ *   in regular commit arrays. The 'message' element might or might not be set.
  * @param $commit_actions
  *   The commit actions of the above commit that is about to happen.
  *   Further information retrieval functions won't work on this array as well.
+ *   Also, the 'source items' element of each action and the 'revision' element
+ *   of each item in these actions might not be set.
  * @param $branch
  *   The target branch where the commit will happen (a string like 'DRUPAL-5').
  *   If the respective backend doesn't support branches,
