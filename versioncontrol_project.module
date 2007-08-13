@@ -8,9 +8,6 @@
  * Copyright 2006, 2007 Derek Wright ("dww" , http://drupal.org/user/46549)
  * Copyright 2007 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
-// TODO: hook into versioncontrol_account in order to catch account deletions
-//       (for updating the list of maintainers).
-
 
 /**
  * Implementation of hook_menu().
@@ -101,13 +98,21 @@ function versioncontrol_project_admin() {
     $repository_options[$repo_id] = check_plain($repository['name']);
   }
 
+  $form['versioncontrol_project_restrict_commits'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Enable project-based commit restrictions'),
+    '#description' => t('Restrict commit access to projects that the user maintains. (This feature requires a pre-commit hook script that integrates with the Version Control API.)'),
+    '#default_value' => variable_get('versioncontrol_project_restrict_commits', 1),
+    '#weight' => -20,
+  );
+
   $form['versioncontrol_project_content_types'] = array(
     '#type' => 'checkboxes',
     '#title' => t('Project node content types'),
     '#description' => t('The content types that you specify here will be enhanced with version control capabilities.'),
     '#default_value' => versioncontrol_project_get_content_types(),
     '#options' => node_get_types('names'),
-    '#weight' => -20,
+    '#weight' => -10,
   );
   // only store checked checkbox keys
   $form['array_filter'] = array(
@@ -278,20 +283,10 @@ function versioncontrol_project_form_validate($form_id, $form_values) {
     return;
   }
 
-  // I think this one is very drupal.org specific (if needed at all?), isn't
-  // generic enough even for CVS repositories, and shouldn't be in here.
-  // TODO: Replace this with an array of allowed root directories which are
-  // then checked with case sensitiveness.
-  /*if (variable_get('versioncontrol_project_dir_validate_root_by_case', 1)) {
-    if ($path_elements[1] != drupal_strtolower($path_elements[1])) {
-      form_set_error('project_directory', t("The root of the project directory (%root) must be lowercase.", array('%root' => $path_elements[1])));
-      return;
-    }
-  }*/
-
   // project.module specific. Not the most ideal place for these checks,
   // but what the hell, it doesn't hurt nobody.
   if (module_exists('project')) {
+    // TODO: admin interface
     if (project_use_taxonomy() && variable_get('versioncontrol_project_dir_validate_by_type', 1)) {
       $node = node_load($form_values['nid']);
       $project_type_tid = $node->project_type;
@@ -991,6 +986,7 @@ function versioncontrol_project_delete_project($nid) {
 }
 
 /**
+ * Implementation of hook_versioncontrol_commit_access():
  * Project based commit restrictions.
  *
  * @param $commit
@@ -1043,4 +1039,18 @@ function versioncontrol_project_versioncontrol_commit_access($commit, $commit_ac
     return FALSE;
   }
   return NULL;
+}
+
+/**
+ * Implementation of hook_versioncontrol_account():
+ * Delete commit access for accounts that are being deleted.
+ */
+function versioncontrol_project_versioncontrol_account($op, $uid, $username, $repository, $additional_data = array()) {
+  if ($op == 'delete') {
+    db_query("UPDATE {versioncontrol_project_projects}
+              SET repo_id = '0', owner_uid = '0', directory = ''
+              WHERE owner_uid = '%d'", $uid);
+    db_query("DELETE FROM {versioncontrol_project_comaintainers}
+              WHERE uid = '%d'", $uid);
+  }
 }
