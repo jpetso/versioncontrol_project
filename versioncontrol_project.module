@@ -1030,7 +1030,7 @@ function versioncontrol_project_versioncontrol_commit_access($commit, $commit_ac
       {
         $path = $action['current item']['path'] .'/';
       }
-      if (strpos($path, $project .'/')) {
+      if (strpos($path, $project .'/') !== FALSE) {
         continue;
       }
     }
