@@ -8,6 +8,7 @@
  * Copyright 2006, 2007 Derek Wright ("dww" , http://drupal.org/user/46549)
  * Copyright 2007 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
+// TODO: only return published projects by default
 
 /**
  * Implementation of hook_menu().
@@ -101,7 +102,7 @@ function versioncontrol_project_admin() {
   $form['versioncontrol_project_restrict_commits'] = array(
     '#type' => 'checkbox',
     '#title' => t('Enable project-based commit restrictions'),
-    '#description' => t('Restrict commit access to projects that the user maintains. (This feature requires a pre-commit hook script that integrates with the Version Control API.)'),
+    '#description' => t('Restrict commit access to projects that the user maintains. (This feature requires pre-commit hook scripts that integrate with the Version Control API.)'),
     '#default_value' => variable_get('versioncontrol_project_restrict_commits', 1),
     '#weight' => -20,
   );
@@ -1006,28 +1007,35 @@ function versioncontrol_project_delete_project($nid) {
  *   this may be NULL instead.
  *
  * @return
- *   FALSE when the commit should not be allowed, NULL if we're indifferent,
+ *   An array with error messages (without trailing newlines) if the commit
+ *   should not be allowed, or an empty array if we're indifferent,
  *   or TRUE if the commit should be allowed no matter what other
  *   commit access callbacks say.
  */
 function versioncontrol_project_versioncontrol_commit_access($commit, $commit_actions, $branch = NULL) {
   if (empty($commit_actions)) {
-    return NULL; // no idea if this is ever going to happen, but let's be prepared
+    return array(); // no idea if this is ever going to happen, but let's be prepared
   }
   if (!variable_get('versioncontrol_project_restrict_commits', 1)) {
-    return; // we don't need no restrictions
+    return array(); // we don't need no restrictions
   }
+
+  $error_messages = _versioncontrol_project_check_drupal_user($uid);
+  if (!empty($error_messages)) {
+    return $error_messages;
+  }
+
   $user_projects = versioncontrol_project_get_projects_for_maintainer($commit['uid']);
 
   foreach ($commit_actions as $action) {
+    $item = versioncontrol_get_affected_item($action);
+
     // Allow item modifications if they happen inside one of the user's projects
     foreach ($user_projects as $project) {
-      $path = $action['current item']['path'];
+      $path = $item['path'];
 
-      if ($action['current item']['type'] == VERSIONCONTROL_ITEM_DIRECTORY
-          && $action['current item']['path'] != '/')
-      {
-        $path = $action['current item']['path'] .'/';
+      if ($item['type'] == VERSIONCONTROL_ITEM_DIRECTORY && $item['path'] != '/') {
+        $path = $item['path'] .'/';
       }
       if (strpos($path, $project .'/') !== FALSE) {
         continue;
@@ -1035,9 +1043,103 @@ function versioncontrol_project_versioncontrol_commit_access($commit, $commit_ac
     }
     // All projects have been checked and continue has not yet been hit,
     // which means the item is outside the user's projects.
-    return FALSE;
+    $error_messages[] = t(
+      "** Access denied: !user does not have permission to commit files in:\n".
+      "** !directory\n".
+      "** Please contact the owner of this project and request to be added\n".
+      "** as a project maintainer.",
+      array('!user' => $user->name, '!directory' => $commit['directory'])
+    );
+    return $error_messages;
   }
-  return NULL;
+  return array();
+}
+
+/**
+ * Implementation of hook_versioncontrol_branch_access():
+ * Determine if the given branch may be assigned to a directory.
+ *
+ * @return
+ *   An array with error messages (without trailing newlines) if the branch
+ *   may not be assigned, or an empty array if we're indifferent,
+ *   or TRUE if the branch may be assigned no matter what other
+ *   branch access callbacks say.
+ */
+function versioncontrol_project_versioncontrol_branch_access($op, $branch) {
+  return _versioncontrol_project_branch_or_tag_access($branch);
+}
+
+/**
+ * Implementation of hook_versioncontrol_tag_access():
+ * Determine if the given tag may be assigned to a directory.
+ *
+ * @return
+ *   An array with error messages (without trailing newlines) if the tag
+ *   may not be assigned, or an empty array if we're indifferent,
+ *   or TRUE if the tag may be assigned no matter what other
+ *   tag access callbacks say.
+ */
+function versioncontrol_project_versioncontrol_tag_access($op, $tag) {
+  return _versioncontrol_project_branch_or_tag_access($tag);
+}
+
+/**
+ * Shared code between branch_access() and tag_access():
+ * Disallow assigning tags or branches in directories that don't have
+ * a project assigned.
+ */
+function _versioncontrol_project_branch_or_tag_access($branch_or_tag) {
+  if (!variable_get('versioncontrol_project_restrict_commits', 1)) {
+    return array(); // we don't need no restrictions
+  }
+
+  $error_messages = _versioncontrol_project_check_drupal_user($branch_or_tag);
+  if (!empty($error_messages)) {
+    return $error_messages;
+  }
+
+  $project = versioncontrol_project_get_project_for_item(
+    $branch_or_tag['repository'], $branch_or_tag['directory']
+  );
+  if (!isset($project)) {
+    $backends = versioncontrol_get_backends();
+    $backend = $backends[$repository['vcs']];
+
+    $error_messages[] = t(
+      "** ERROR: no published project was found for this directory:\n".
+      "** !directory\n".
+      "** Please contact a !vcs administrator for help.",
+      array('!directory' => $branch_or_tag['directory'], '!vcs' => $backend['name'])
+    );
+    return $error_messages;
+  }
+  return array();
+}
+
+/**
+ * Determine if the user for the given Drupal user id exists, and return
+ * an appropriate error message array.
+ *
+ * @return
+ *   An empty array if the user exists, or an array filled
+ *   with an error message if the user doesn't exist.
+ */
+function _versioncontrol_project_check_drupal_user($branch_or_tag) {
+  if ($branch_or_tag['uid'] != 0) {
+    $user = user_load(array('uid' => $branch_or_tag['uid']));
+  }
+  if (!$user) {
+    $backends = versioncontrol_get_backends();
+    $backend = $backends[$branch_or_tag['repository']['vcs']];
+
+    $error_message = t(
+      "** ERROR: no Drupal user matches !vcs user '!user'.\n".
+      "** Please contact a !vcs administrator for help.",
+      array('!vcs' => $backend['name'], '!user' => $branch_or_tag['username'])
+    );
+    return array($error_message);
+  }
+  return array();
 }
 
 /**
