@@ -1020,7 +1020,7 @@ function versioncontrol_project_versioncontrol_commit_access($commit, $commit_ac
     return array(); // we don't need no restrictions
   }
 
-  $error_messages = _versioncontrol_project_check_drupal_user($uid);
+  $error_messages = _versioncontrol_project_check_drupal_user($commit);
   if (!empty($error_messages)) {
     return $error_messages;
   }
@@ -1065,8 +1065,8 @@ function versioncontrol_project_versioncontrol_commit_access($commit, $commit_ac
  *   or TRUE if the branch may be assigned no matter what other
  *   branch access callbacks say.
  */
-function versioncontrol_project_versioncontrol_branch_access($op, $branch) {
-  return _versioncontrol_project_branch_or_tag_access($branch);
+function versioncontrol_project_versioncontrol_branch_access($op, $branch, $branched_items) {
+  return _versioncontrol_project_branch_or_tag_access($branch, $branched_items);
 }
 
 /**
@@ -1079,8 +1079,8 @@ function versioncontrol_project_versioncontrol_branch_access($op, $branch) {
  *   or TRUE if the tag may be assigned no matter what other
  *   tag access callbacks say.
  */
-function versioncontrol_project_versioncontrol_tag_access($op, $tag) {
-  return _versioncontrol_project_branch_or_tag_access($tag);
+function versioncontrol_project_versioncontrol_tag_access($op, $tag, $tagged_items) {
+  return _versioncontrol_project_branch_or_tag_access($tag, $tagged_items);
 }
 
 /**
@@ -1088,7 +1088,7 @@ function versioncontrol_project_versioncontrol_tag_access($op, $tag) {
  * Disallow assigning tags or branches in directories that don't have
  * a project assigned.
  */
-function _versioncontrol_project_branch_or_tag_access($branch_or_tag) {
+function _versioncontrol_project_branch_or_tag_access($branch_or_tag, $items) {
   if (!variable_get('versioncontrol_project_restrict_commits', 1)) {
     return array(); // we don't need no restrictions
   }
@@ -1124,18 +1124,18 @@ function _versioncontrol_project_branch_or_tag_access($branch_or_tag) {
  *   An empty array if the user exists, or an array filled
  *   with an error message if the user doesn't exist.
  */
-function _versioncontrol_project_check_drupal_user($branch_or_tag) {
-  if ($branch_or_tag['uid'] != 0) {
-    $user = user_load(array('uid' => $branch_or_tag['uid']));
+function _versioncontrol_project_check_drupal_user($object) {
+  if ($object['uid'] != 0) {
+    $user = user_load(array('uid' => $object['uid']));
   }
   if (!$user) {
     $backends = versioncontrol_get_backends();
-    $backend = $backends[$branch_or_tag['repository']['vcs']];
+    $backend = $backends[$object['repository']['vcs']];
 
     $error_message = t(
       "** ERROR: no Drupal user matches !vcs user '!user'.\n".
       "** Please contact a !vcs administrator for help.",
-      array('!vcs' => $backend['name'], '!user' => $branch_or_tag['username'])
+      array('!vcs' => $backend['name'], '!user' => $object['username'])
     );
     return array($error_message);
   }
