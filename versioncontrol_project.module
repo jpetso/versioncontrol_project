@@ -1027,7 +1027,7 @@ function versioncontrol_project_versioncontrol_commit_access($commit, $commit_ac
 
   $user_projects = versioncontrol_project_get_projects_for_maintainer($commit['uid']);
 
-  foreach ($commit_actions as $action) {
+  foreach ($commit_actions as $path => $action) {
     $item = versioncontrol_get_affected_item($action);
 
     // Allow item modifications if they happen inside one of the user's projects
@@ -1057,7 +1057,30 @@ function versioncontrol_project_versioncontrol_commit_access($commit, $commit_ac
 
 /**
  * Implementation of hook_versioncontrol_branch_access():
- * Determine if the given branch may be assigned to a directory.
+ * Determine if the given branch may be assigned to a set of items.
+ *
+ * @param $branch
+ *   A structured array that consists of the following elements:
+ *
+ *   'branch_name': The name of the target branch (a string like 'DRUPAL-6--1').
+ *   'action': Specifies what is going to happen with the branch. This is
+ *             VERSIONCONTROL_ACTION_ADDED if the branch is being created,
+ *             VERSIONCONTROL_ACTION_MOVED if it's being renamed,
+ *             or VERSIONCONTROL_ACTION_DELETED if it is slated for deletion.
+ *   'uid': The Drupal user id of the committer.
+ *   'username': The system specific VCS username of the committer.
+ *   'repository': The repository where the branching occurs,
+ *                 given as a structured array, like the return value
+ *                 of versioncontrol_get_repository().
+ *   'directory': The deepest-level directory in the repository that is common
+ *                to all of the branched items.
+ *
+ * @param $branched_items
+ *   An array of all items that are affected by the branching operation.
+ *   Compared to standard item arrays, the ones in here don't need the
+ *   'revision' element to be set and can optionally contain a 'source branch'
+ *   element that specifies the original branch of this item.
+ *   (For $op == 'delete', 'source branch' is never set.)
  *
  * @return
  *   An array with error messages (without trailing newlines) if the branch
@@ -1065,13 +1088,36 @@ function versioncontrol_project_versioncontrol_commit_access($commit, $commit_ac
  *   or TRUE if the branch may be assigned no matter what other
  *   branch access callbacks say.
  */
-function versioncontrol_project_versioncontrol_branch_access($op, $branch, $branched_items) {
+function versioncontrol_project_versioncontrol_branch_access($branch, $branched_items) {
   return _versioncontrol_project_branch_or_tag_access($branch, $branched_items);
 }
 
 /**
  * Implementation of hook_versioncontrol_tag_access():
- * Determine if the given tag may be assigned to a directory.
+ * Determine if the given tag may be assigned to a set of items.
+ *
+ * @param $tag
+ *   A structured array that consists of the following elements:
+ *
+ *   'tag_name': The name of the tag (a string like 'DRUPAL-6--1-1').
+ *   'action': Specifies what is going to happen with the tag. This is
+ *             VERSIONCONTROL_ACTION_ADDED if the tag is being created,
+ *             VERSIONCONTROL_ACTION_MOVED if it's being renamed,
+ *             or VERSIONCONTROL_ACTION_DELETED if it is slated for deletion.
+ *   'uid': The Drupal user id of the committer.
+ *   'username': The system specific VCS username of the committer.
+ *   'repository': The repository where the tagging occurs,
+ *                 given as a structured array, like the return value
+ *                 of versioncontrol_get_repository().
+ *   'directory': The deepest-level directory in the repository that is common
+ *                to all of the tagged items.
+ *
+ * @param $tagged_items
+ *   An array of all items that are affected by the tagging operation.
+ *   Compared to standard item arrays, the ones in here don't need the
+ *   'revision' element to be set and can optionally contain a 'source branch'
+ *   element that specifies the original branch of this item.
+ *   (For $op == 'move' or $op == 'delete', 'source branch' is never set.)
  *
  * @return
  *   An array with error messages (without trailing newlines) if the tag
@@ -1079,7 +1125,7 @@ function versioncontrol_project_versioncontrol_branch_access($op, $branch, $bran
  *   or TRUE if the tag may be assigned no matter what other
  *   tag access callbacks say.
  */
-function versioncontrol_project_versioncontrol_tag_access($op, $tag, $tagged_items) {
+function versioncontrol_project_versioncontrol_tag_access($tag, $tagged_items) {
   return _versioncontrol_project_branch_or_tag_access($tag, $tagged_items);
 }
 
@@ -1113,6 +1159,7 @@ function _versioncontrol_project_branch_or_tag_access($branch_or_tag, $items) {
     );
     return $error_messages;
   }
+  // TODO: project directory based access check!
   return array();
 }
 
