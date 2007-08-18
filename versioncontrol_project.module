@@ -51,7 +51,7 @@ function versioncontrol_project_menu($may_cache) {
             'weight' => 4,
           );
 
-          if(versioncontrol_is_account_approved($user->uid, $repo_id)) {
+          if (versioncontrol_is_account_approved($user->uid, $repo_id)) {
             $items[] = array(
               'path' => 'node/'. $node->nid .'/commit-access',
               'title' => t('Commit access'),
