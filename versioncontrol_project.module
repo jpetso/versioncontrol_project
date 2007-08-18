@@ -149,6 +149,7 @@ function versioncontrol_project_nodeapi(&$node, $op, $arg = NULL) {
           db_query("UPDATE {versioncontrol_project_projects}
                     SET owner_uid = '%d'
                     WHERE nid = '%d'", $node->uid, $node->nid);
+          $node->versioncontrol_project['owner_uid'] = $node->uid;
         }
         return;
 
@@ -1120,10 +1121,12 @@ function _versioncontrol_project_get_project_error_appendix($repository, $item_p
  *
  * @param $branched_items
  *   An array of all items that are affected by the branching operation.
- *   Compared to standard item arrays, the ones in here don't need the
- *   'revision' element to be set and can optionally contain a 'source branch'
- *   element that specifies the original branch of this item.
+ *   Compared to standard item arrays, the ones in here may not have the
+ *   'revision' element set and can optionally contain a 'source branch'
+ *   element that specifies the original branch name of this item.
  *   (For $op == 'delete', 'source branch' is never set.)
+ *   An empty $branched_items array means that the whole repository has been
+ *   branched.
  *
  * @return
  *   An array with error messages (without trailing newlines) if the branch
@@ -1157,10 +1160,12 @@ function versioncontrol_project_versioncontrol_branch_access($branch, $branched_
  *
  * @param $tagged_items
  *   An array of all items that are affected by the tagging operation.
- *   Compared to standard item arrays, the ones in here don't need the
- *   'revision' element to be set and can optionally contain a 'source branch'
- *   element that specifies the original branch of this item.
+ *   Compared to standard item arrays, the ones in here may not have the
+ *   'revision' element set and can optionally contain a 'source branch'
+ *   element that specifies the original branch name of this item.
  *   (For $op == 'move' or $op == 'delete', 'source branch' is never set.)
+ *   An empty $tagged_items array means that the whole repository has been
+ *   tagged.
  *
  * @return
  *   An array with error messages (without trailing newlines) if the tag
