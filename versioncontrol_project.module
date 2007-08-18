@@ -835,7 +835,7 @@ function _versioncontrol_project_get_comaintainers($nid) {
  *
  * @param $repository
  *   The repository which contains the item.
- * @param $path
+ * @param $item_path
  *   The path of the item.
  *
  * @return
@@ -852,29 +852,39 @@ function _versioncontrol_project_get_comaintainers($nid) {
  *
  *   If the item doesn't belong to any project, NULL is returned.
  */
-function versioncontrol_project_get_project_for_item($repository, $path) {
-  return _versioncontrol_project_get_project_for_item($repository['repo_id'], $path);
+function versioncontrol_project_get_project_for_item($repository, $item_path) {
+  return _versioncontrol_project_get_project_for_item($repository['repo_id'], $item_path);
 }
 
-function _versioncontrol_project_get_project_for_item($repo_id, $path) {
+function _versioncontrol_project_get_project_for_item($repo_id, $item_path) {
   static $projects_for_item = array();
+  if (!isset($projects_for_item[$repo_id])) {
+    $projects_for_item[$repo_id] = array();
+  }
 
-  if (!isset($projects_for_item[$path])) { // not cached, find out now
-    $current_path = $path;
+  $current_path = $item_path;
+  $current_paths = array();
 
-    // Now, we loop over the path, using the most restrictive path first,
-    // and query the database to find a matching published project node.
-    while (TRUE) {
+  // Now, we loop over the path, using the most restrictive path first,
+  // and query the database to find a matching published project node.
+  while (TRUE) {
+    $current_paths[] = $current_path;
+
+    // Use the cache if possible.
+    if (isset($projects_for_item[$repo_id][$current_path])) {
+      $project_for_item = $projects_for_item[$repo_id][$current_path];
+    }
+    else {
       $result = db_query("SELECT p.nid, p.owner_uid, p.repo_id, p.directory
                           FROM {versioncontrol_project_projects} p
                           WHERE p.nid > 0
-                           AND p.repo_id = '%d' AND p.directory = '%s'",
+                          AND p.repo_id = '%d' AND p.directory = '%s'",
                           $repo_id, $current_path);
 
       if ($project = db_fetch_object($result)) {
         $comaintainers = _versioncontrol_project_get_comaintainers($project->nid);
 
-        $projects_for_item[$path] = array(
+        $project_for_item = array(
           'nid'             => $project->nid,
           'owner_uid'       => $project->owner_uid,
           'repo_id'         => $project->repo_id,
@@ -884,19 +894,26 @@ function _versioncontrol_project_get_project_for_item($repo_id, $path) {
           ),
           'comaintainer_uids' => $comaintainers,
         );
-        return $projects_for_item[$path];
       }
-
-      if ($current_path == dirname($current_path)) {
-        break; // stop at the top-level directory
+    }
+    if (isset($project_for_item)) {
+      foreach ($current_paths as $path) {
+        $projects_for_item[$repo_id][$path] = $project_for_item;
       }
-      $current_path = dirname($current_path);
+      return ($project_for_item === FALSE) ? NULL : $project_for_item;
     }
 
-    // If we didn't find it already, cache the answer as not-found
-    $projects_for_item[$path] = 0;
+    if ($current_path == dirname($current_path)) {
+      break; // stop at the top-level directory
+    }
+    $current_path = dirname($current_path);
   }
-  return ($projects_for_item[$path] != 0) ? $projects_for_item[$path] : NULL;
+
+  // If we didn't find it already, cache the answer as not-found
+  foreach ($current_paths as $path) {
+    $projects_for_item[$repo_id][$path] = FALSE;
+  }
+  return NULL;
 }
 
 
