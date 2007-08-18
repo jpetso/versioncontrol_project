@@ -210,7 +210,13 @@ function versioncontrol_project_form_alter($form_id, &$form) {
 
     // We're ready to go, add the form elements now.
     $form['#validate']['versioncontrol_project_form_validate'] = array();
-    $form['#submit']['versioncontrol_project_form_submit'] = array();
+
+    // Need to do it this way so that we are executed before the nodeapi hook.
+    // Otherwise, stuff goes wrong if the node author changes.
+    $form['#submit'] = array_merge(
+      array('versioncontrol_project_form_submit' => array()),
+      $form['#submit']
+    );
 
     $form['versioncontrol_project'] = array(
       '#type' => 'fieldset',
@@ -756,17 +762,15 @@ function versioncontrol_project_get_projects($constraints = array()) {
   }
 
   if (isset($constraints['owner_uids'])) {
-    foreach ($constraints['maintainer_uids'] as $uid) {
-      if (in_array($uid_constraint, $maintainer_uids)) {
-        $or_constraints[] = "p.owner_uid = '%d'";
-        $params[] = $uid;
-      }
+    foreach ($constraints['owner_uids'] as $uid) {
+      $or_constraints[] = "p.owner_uid = '%d'";
+      $params[] = $uid;
     }
     $and_constraints[] = implode(' OR ', $or_constraints);
   }
 
   if (isset($constraints['maintainer_uids'])) {
-    $maintainer_join = ' INNER JOIN {versioncontrol_project_comaintainers} c
+    $maintainer_join = ' LEFT JOIN {versioncontrol_project_comaintainers} c
                          ON p.nid = c.nid';
 
     foreach ($constraints['maintainer_uids'] as $uid) {
@@ -930,34 +934,35 @@ function versioncontrol_project_set_project($project) {
   if (!isset($node->nid)) { // the node doesn't exist
     return FALSE;
   }
+  $project['owner_uid'] = $node->uid;
 
   // If the entry already exists, delete it.
   db_query("DELETE FROM {versioncontrol_project_projects}
-            WHERE nid = '%d'", $node->nid);
+            WHERE nid = '%d'", $project['nid']);
 
   db_query("INSERT INTO {versioncontrol_project_projects}
             (nid, owner_uid, repo_id, directory)
             VALUES ('%d', '%d', '%d', '%s')",
-            $node->nid, $node->uid,
+            $project['nid'], $project['owner_uid'],
             $project['repo_id'], $project['directory']);
 
   if (isset($project['comaintainer_uids'])) {
     // Delete the list, so we can easily insert them.
     db_query("DELETE FROM {versioncontrol_project_comaintainers}
-              WHERE nid = '%d'", $node->nid);
+              WHERE nid = '%d'", $project['nid']);
 
     // Insert each comaintainer into the database.
     foreach ($project['comaintainer_uids'] as $uid) {
-      if ($uid == $node->uid) {
+      if ($uid == $project['owner_uid']) {
         continue; // the owner is not a co-maintainer
       }
       db_query("INSERT INTO {versioncontrol_project_comaintainers} (nid, uid)
-                VALUES ('%d', '%d')", $node->nid, $uid);
+                VALUES ('%d', '%d')", $project['nid'], $uid);
     }
   }
 
-  // Insertion hooks, if any, will go here. (Remember to add the owner and
-  // maintainer uids to the project array if you provide a hook.)
+  // Insertion/update hooks, if any, will go here. (Remember to add
+  // the maintainer uids to the project array if you provide a hook.)
 
   return TRUE;
 }
@@ -1020,7 +1025,7 @@ function versioncontrol_project_versioncontrol_commit_access($commit, $commit_ac
     return array(); // we don't need no restrictions
   }
 
-  $error_messages = _versioncontrol_project_check_drupal_user($commit);
+  $error_messages = _versioncontrol_project_check_drupal_user($commit, $user);
   if (!empty($error_messages)) {
     return $error_messages;
   }
@@ -1029,6 +1034,7 @@ function versioncontrol_project_versioncontrol_commit_access($commit, $commit_ac
 
   foreach ($commit_actions as $path => $action) {
     $item = versioncontrol_get_affected_item($action);
+    $is_allowed = FALSE;
 
     // Allow item modifications if they happen inside one of the user's projects
     foreach ($user_projects as $project) {
@@ -1037,22 +1043,42 @@ function versioncontrol_project_versioncontrol_commit_access($commit, $commit_ac
       if ($item['type'] == VERSIONCONTROL_ITEM_DIRECTORY && $item['path'] != '/') {
         $path = $item['path'] .'/';
       }
-      if (strpos($path, $project .'/') !== FALSE) {
-        continue;
+      if (strpos($path, $project['directory'] .'/') !== FALSE) {
+        $is_allowed = TRUE;
+        break;
       }
     }
-    // All projects have been checked and continue has not yet been hit,
-    // which means the item is outside the user's projects.
-    $error_messages[] = t(
-      "** Access denied: !user does not have permission to commit files in:\n".
-      "** !directory\n".
-      "** Please contact the owner of this project and request to be added\n".
-      "** as a project maintainer.",
-      array('!user' => $user->name, '!directory' => $commit['directory'])
-    );
-    return $error_messages;
+    if (!$is_allowed) {
+      // All projects have been checked and continue has not yet been hit,
+      // which means the item is outside the user's projects.
+      $error_messages[] = t(
+'** Access denied: !user does not have permission to commit files in:
+** !directory',
+        array('!user' => $user->name, '!directory' => $commit['directory'])
+      ) .
+      _versioncontrol_project_get_project_error_appendix(
+        $commit['repository'], $item['path']
+      );
+      return $error_messages;
+    }
   }
   return array();
+}
+
+function _versioncontrol_project_get_project_error_appendix($repository, $item_path) {
+  $project = versioncontrol_project_get_project_for_item($repository, $item_path);
+  if (isset($project) && $project['owner_uid'] != 0) {
+    $owner = user_load(array('uid' => $project['owner_uid']));
+  }
+  if (!$owner) {
+    return '';
+  }
+  return "\n" . t(
+'** Please contact the owner of this project
+** (!user, !user-url)
+** and request to be added as a project maintainer.',
+    array('!user' => $owner->name, '!user-url' => 'user/'. $owner->uid)
+  );
 }
 
 /**
@@ -1139,7 +1165,7 @@ function _versioncontrol_project_branch_or_tag_access($branch_or_tag, $items) {
     return array(); // we don't need no restrictions
   }
 
-  $error_messages = _versioncontrol_project_check_drupal_user($branch_or_tag);
+  $error_messages = _versioncontrol_project_check_drupal_user($branch_or_tag, $user);
   if (!empty($error_messages)) {
     return $error_messages;
   }
@@ -1167,11 +1193,18 @@ function _versioncontrol_project_branch_or_tag_access($branch_or_tag, $items) {
  * Determine if the user for the given Drupal user id exists, and return
  * an appropriate error message array.
  *
+ * @param $object
+ *   The commit or branch/tag operation array that should be checked.
+ * @param $user
+ *   A by-reference parameter that will be filled with the return value
+ *   of user_load(). That is, if this function returns an empty array
+ *   (no errors) then this is the user object of the committer.
+ *
  * @return
  *   An empty array if the user exists, or an array filled
  *   with an error message if the user doesn't exist.
  */
-function _versioncontrol_project_check_drupal_user($object) {
+function _versioncontrol_project_check_drupal_user($object, &$user) {
   if ($object['uid'] != 0) {
     $user = user_load(array('uid' => $object['uid']));
   }
