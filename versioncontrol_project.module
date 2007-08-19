@@ -20,13 +20,13 @@ function versioncontrol_project_menu($may_cache) {
 
   if ($may_cache) {
     $items[] = array(
-      'path' => 'admin/project/versioncontrol-project',
-      'title' => t('Version control / project node integration'),
+      'path' => 'admin/project/versioncontrol-settings/project',
+      'title' => t('Project node integration'),
       'description' => t('Specify the content types that will be integrated with version control systems, and configure how this will be done.'),
       'callback' => 'drupal_get_form',
       'callback arguments' => array('versioncontrol_project_admin'),
       'access' => $admin_access,
-      'type' => MENU_NORMAL_ITEM,
+      'type' => MENU_LOCAL_TASK,
     );
   }
   else {
