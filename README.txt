@@ -7,9 +7,10 @@ supported by the Version Control API.
 
 SHORT DESCRIPTION
 -----------------
-This module provides integration of Drupal nodes ("project nodes") with
-repositories that have been set up with Version Control API, most prominently
-featuring commit access control based on project maintainership.
+This module makes it possible for users with a VCS account to
+associate Drupal nodes ("project nodes") with repository locations and
+appoint co-maintainers for these projects, which enables commit access control
+based on project maintainership.
 
 Version Control / Project Node Integration depends on the
 Version Control API module.
