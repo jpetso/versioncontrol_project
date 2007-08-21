@@ -141,15 +141,23 @@ function versioncontrol_project_nodeapi(&$node, $op, $arg = NULL) {
         }
         return;
 
+      case 'insert':
       case 'update':
-        if (!isset($node->versioncontrol_project)) {
-          return;
+        if (!$node->repo_id) {
+          versioncontrol_project_delete_project($node->nid);
+          unset($node->versioncontrol_project);
+          unset($node->repo_id);
+          unset($node->project_directory);
         }
-        if ($node->uid != $node->versioncontrol_project['owner_uid']) {
-          db_query("UPDATE {versioncontrol_project_projects}
-                    SET owner_uid = '%d'
-                    WHERE nid = '%d'", $node->uid, $node->nid);
-          $node->versioncontrol_project['owner_uid'] = $node->uid;
+        else {
+          $directory = _versioncontrol_project_remove_trailing_slashes($node->project_directory);
+          $project = array(
+            'nid' => $node->nid,
+            'owner_uid' => $node->uid,
+            'repo_id' => $node->repo_id,
+            'directory' => $node->project_directory,
+          );
+          versioncontrol_project_set_project($project);
         }
         return;
 
@@ -211,13 +219,6 @@ function versioncontrol_project_form_alter($form_id, &$form) {
 
     // We're ready to go, add the form elements now.
     $form['#validate']['versioncontrol_project_form_validate'] = array();
-
-    // Need to do it this way so that we are executed before the nodeapi hook.
-    // Otherwise, stuff goes wrong if the node author changes.
-    $form['#submit'] = array_merge(
-      array('versioncontrol_project_form_submit' => array()),
-      $form['#submit']
-    );
 
     $form['versioncontrol_project'] = array(
       '#type' => 'fieldset',
@@ -318,24 +319,6 @@ function versioncontrol_project_form_validate($form_id, $form_values) {
         return;
       }
     }
-  }
-}
-
-/**
- * Add or update the project data when the add/edit project form is submitted.
- */
-function versioncontrol_project_form_submit($form_id, $form_values) {
-  if (!$form_values['repo_id']) {
-    versioncontrol_project_delete_project($form_values['nid']);
-  }
-  else {
-    $directory = _versioncontrol_project_remove_trailing_slashes($form_values['project_directory']);
-    $project = array(
-      'nid' => $form_values['nid'],
-      'repo_id' => $form_values['repo_id'],
-      'directory' => $form_values['project_directory'],
-    );
-    versioncontrol_project_set_project($project);
   }
 }
 
@@ -947,12 +930,14 @@ function versioncontrol_project_set_project($project) {
               $project['nid'], 0, 0, '');
   }
 
-  // Get the project node, so we can determine the node owner.
-  $node = node_load($project['nid']);
-  if (!isset($node->nid)) { // the node doesn't exist
-    return FALSE;
+  if (!isset($project['owner_uid'])) {
+    // Get the project node, so we can determine the node owner.
+    $node = node_load($project['nid']);
+    if (!isset($node->nid)) { // the node doesn't exist
+      return FALSE;
+    }
+    $project['owner_uid'] = $node->uid;
   }
-  $project['owner_uid'] = $node->uid;
 
   // If the entry already exists, delete it.
   db_query("DELETE FROM {versioncontrol_project_projects}
