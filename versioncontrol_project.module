@@ -8,7 +8,8 @@
  * Copyright 2006, 2007 Derek Wright ("dww" , http://drupal.org/user/46549)
  * Copyright 2007 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
-// TODO: only return published projects by default
+// TODO: check project-based permissions for branches and tags as well.
+// TODO: only return published projects by default.
 
 /**
  * Implementation of hook_menu().
@@ -35,9 +36,7 @@ function versioncontrol_project_menu($may_cache) {
       // the 'administer nodes' permission, add the 'CVS access' tab, but only
       // if the project is associated with a repository.
       $node = node_load(arg(1));
-      if (isset($node->versioncontrol_project)
-          && ($node->uid == $user->uid || user_access('administer nodes')))
-      {
+      if (isset($node->versioncontrol_project)) {
         $repo_id = $node->versioncontrol_project['repo_id'];
 
         if ($repo_id > 0) {
@@ -51,7 +50,8 @@ function versioncontrol_project_menu($may_cache) {
             'weight' => 4,
           );
 
-          if (versioncontrol_is_account_approved($user->uid, $repo_id)) {
+          if (($node->uid == $user->uid && versioncontrol_is_account_authorized($user->uid, $repo_id))
+              || user_access('administer nodes')) {
             $items[] = array(
               'path' => 'node/'. $node->nid .'/commit-access',
               'title' => t('Commit access'),
