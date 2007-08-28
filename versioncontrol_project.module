@@ -900,6 +900,40 @@ function _versioncontrol_project_get_project_for_item($repo_id, $item_path) {
   return NULL;
 }
 
+/**
+ * Retrieve the projects that are associated to the affected items
+ * in the given commit. If no projects can be associated to the commit items,
+ * an empty array is returned.
+ *
+ * @return
+ *   A structured array containing the list of associated projects.
+ *   The project node ids are the array keys, and the complete project arrays
+ *   are given in the array values.
+ */
+function versioncontrol_get_projects_for_commit($commit) {
+  // First, try if the directory item itself is wholly inside a project.
+  // In that case, we wouldn't need to check each item separately.
+  $commit_directory_item = versioncontrol_get_commit_directory_item($commit);
+  $project = versioncontrol_project_get_project_for_item($commit['repository'], $commit['directory']);
+  if (isset($project)) {
+    return array($project['nid'] => $project);
+  }
+
+  // The commit spans zero or multiple projects - we need to check each item.
+  $projects = array();
+  $commit_actions = versioncontrol_get_commit_actions($commit);
+
+  foreach ($commit_actions as $path => $action) {
+    $project = versioncontrol_project_get_project_for_item(
+      $commit['repository'], $path
+    );
+    if (isset($project)) {
+      $projects[$project['nid']] = $project;
+    }
+  }
+  return $projects;
+}
+
 
 /**
  * Add or update a project. This operation will fail if the given project's nid
@@ -1240,5 +1274,77 @@ function versioncontrol_project_versioncontrol_account($op, $uid, $username, $re
               WHERE owner_uid = '%d'", $uid);
     db_query("DELETE FROM {versioncontrol_project_comaintainers}
               WHERE uid = '%d'", $uid);
+  }
+}
+
+
+/**
+ * Implementation of hook_block(): Present a list of the most active projects.
+ */
+function versioncontrol_project_block($op = 'list', $delta = 0) {
+  if ($op == 'list') {
+    $blocks[0]['info'] = t('Most active projects');
+    return $blocks;
+  }
+  else if ($op == 'view') {
+    if ($delta == 0) {
+      $interval = 7 * 24 * 60 * 60;
+      $length = 15;
+      $project_counts = array();
+
+      $commits = versioncontrol_get_commits(array(
+        'date_lower' => time() - $interval,
+      ));
+
+      // Find out which projects are affected, and how active they have been.
+      foreach ($commits as $commit) {
+        $commit_projects = versioncontrol_get_projects_for_commit($commit);
+        foreach ($commit_projects as $nid => $project) {
+          $project_nids[] = $nid;
+        }
+      }
+
+      // Determine the n most active projects.
+      $project_counts = array_count_values($project_nids);
+
+      arsort($project_counts);
+      $limited_project_counts = array();
+      $i = 0;
+      foreach ($project_counts as $nid => $count) {
+        if ($i >= $length) {
+          break;
+        }
+        $limited_project_counts[$nid] = $count;
+        ++$i;
+      }
+      $project_nids = array_keys($limited_project_counts);
+
+      // Ok, now construct a query and get the desired node titles
+      if (empty($project_nids)) {
+        return;
+      }
+      $nid_constraints = array();
+
+      foreach ($project_nids as $nid) {
+        $nid_constraints[] = "nid = '%d'";
+      }
+      $result = db_query('SELECT nid, title FROM {node}
+                          WHERE '. implode(' OR ', $nid_constraints),
+                          $project_nids);
+
+      while ($node = db_fetch_object($result)) {
+        $count = $limited_project_counts[$node->nid];
+        $project_titles[$count] = l($node->title, 'node/'. $node->nid);
+      }
+      if ($project_titles) {
+        krsort($project_titles);
+        $project_titles = array_values($project_titles);
+        $block = array(
+          'subject' => t('Most active projects'),
+          'content' => theme('item_list', $project_titles),
+        );
+        return $block;
+      }
+    }
   }
 }
