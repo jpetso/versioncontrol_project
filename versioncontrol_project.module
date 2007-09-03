@@ -476,7 +476,7 @@ function versioncontrol_project_commit_access_form_validate($form_id, $form_valu
   }
 
   $uid = $result->uid;
-  $vcs_username = versioncontrol_get_account_username_for_uid($uid, $repo_id);
+  $vcs_username = versioncontrol_get_account_username_for_uid($repo_id, $uid);
 
   if (!isset($vcs_username)) {
     $repository = versioncontrol_get_repository($repo_id);
@@ -1297,6 +1297,7 @@ function versioncontrol_project_block($op = 'list', $delta = 0) {
       ));
 
       // Find out which projects are affected, and how active they have been.
+      $project_nids = array();
       foreach ($commits as $commit) {
         $commit_projects = versioncontrol_get_projects_for_commit($commit);
         foreach ($commit_projects as $nid => $project) {
