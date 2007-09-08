@@ -8,7 +8,6 @@
  * Copyright 2006, 2007 Derek Wright ("dww" , http://drupal.org/user/46549)
  * Copyright 2007 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
-// TODO: check project-based permissions for branches and tags as well.
 // TODO: only return published projects by default.
 
 /**
@@ -731,6 +730,13 @@ function versioncontrol_project_get_projects_for_maintainer($uid) {
  *   an empty array is returned.
  */
 function versioncontrol_project_get_projects($constraints = array()) {
+  static $project_cache = array();
+
+  $constraints_serialized = serialize($constraints);
+  if (isset($project_cache[$constraints_serialized])) {
+    return $project_cache[$constraints_serialized];
+  }
+
   $and_constraints = array('p.nid > 0');
   $params = array();
   $maintainer_join = '';
@@ -787,6 +793,7 @@ function versioncontrol_project_get_projects($constraints = array()) {
       'comaintainer_uids' => $comaintainers,
     );
   }
+  $project_cache[$constraints_serialized] = $projects; // cache the results
   return $projects;
 }
 
@@ -1028,6 +1035,7 @@ function versioncontrol_project_delete_project($nid) {
             WHERE nid = '%d'", $nid);
 }
 
+
 /**
  * Implementation of hook_versioncontrol_commit_access():
  * Project based commit restrictions.
@@ -1067,55 +1075,16 @@ function versioncontrol_project_versioncontrol_commit_access($commit, $commit_ac
     return $error_messages;
   }
 
-  $user_projects = versioncontrol_project_get_projects_for_maintainer($commit['uid']);
-
   foreach ($commit_actions as $path => $action) {
     $item = versioncontrol_get_affected_item($action);
-    $is_allowed = FALSE;
-
-    // Allow item modifications if they happen inside one of the user's projects
-    foreach ($user_projects as $project) {
-      $path = $item['path'];
-
-      if ($item['type'] == VERSIONCONTROL_ITEM_DIRECTORY && $item['path'] != '/') {
-        $path = $item['path'] .'/';
-      }
-      if (strpos($path, $project['directory'] .'/') !== FALSE) {
-        $is_allowed = TRUE;
-        break;
-      }
-    }
-    if (!$is_allowed) {
-      // All projects have been checked and continue has not yet been hit,
-      // which means the item is outside the user's projects.
-      $error_messages[] = t(
-'** Access denied: !user does not have permission to commit files in:
-** !directory',
-        array('!user' => $user->name, '!directory' => $commit['directory'])
-      ) .
-      _versioncontrol_project_get_project_error_appendix(
-        $commit['repository'], $item['path']
-      );
+    $error_messages = _versioncontrol_project_check_item_access(
+      $commit['repository'], $item, $user, $commit['directory']
+    );
+    if (!empty($error_messages)) {
       return $error_messages;
     }
   }
   return array();
-}
-
-function _versioncontrol_project_get_project_error_appendix($repository, $item_path) {
-  $project = versioncontrol_project_get_project_for_item($repository, $item_path);
-  if (isset($project) && $project['owner_uid'] != 0) {
-    $owner = user_load(array('uid' => $project['owner_uid']));
-  }
-  if (!$owner) {
-    return '';
-  }
-  return "\n" . t(
-'** Please contact the owner of this project
-** (!user, !user-url)
-** and request to be added as a project maintainer.',
-    array('!user' => $owner->name, '!user-url' => 'user/'. $owner->uid)
-  );
 }
 
 /**
@@ -1211,22 +1180,18 @@ function _versioncontrol_project_branch_or_tag_access($branch_or_tag, $items) {
     return $error_messages;
   }
 
-  $project = versioncontrol_project_get_project_for_item(
-    $branch_or_tag['repository'], $branch_or_tag['directory']
-  );
-  if (!isset($project)) {
-    $backends = versioncontrol_get_backends();
-    $backend = $backends[$repository['vcs']];
-
-    $error_messages[] = t(
-      "** ERROR: no published project was found for this directory:\n".
-      "** !directory\n".
-      "** Please contact a !vcs administrator for help.",
-      array('!directory' => $branch_or_tag['directory'], '!vcs' => $backend['name'])
+  // For version control systems where branching and tagging is done
+  // per-directory (that is, where !empty($items)), check if the given items
+  // are maintained by the user.
+  foreach ($items as $item) {
+    $error_messages = _versioncontrol_project_check_item_access(
+      $branch_or_tag['repository'], $item, $user, $branch_or_tag['directory']
     );
-    return $error_messages;
+    if (!empty($error_messages)) {
+      return $error_messages;
+    }
   }
-  // TODO: project directory based access check!
+  // No objections, the user may execute the branch or tag operation.
   return array();
 }
 
@@ -1262,6 +1227,74 @@ function _versioncontrol_project_check_drupal_user($object, &$user) {
   }
   return array();
 }
+
+/**
+ * Determine if an item is part of one of the projects that are maintained
+ * by the given user, and return an appropriate error message array.
+ *
+ * @param $repository
+ *   The repository where the item is located.
+ * @param $item
+ *   The item that should be checked on access rights.
+ * @param $user
+ *   The author who tries to commit/branch/tag this item.
+ * @param $directory_label
+ *   The directory that is being shown in the error message.
+ *
+ * @return
+ *   An empty array if the item is inside one of the user's projects,
+ *   or an array filled with an error message if it isn't.
+ */
+function _versioncontrol_project_check_item_access($repository, $item, $user, $directory_label) {
+  $user_projects = versioncontrol_project_get_projects_for_maintainer($user->uid);
+  $is_allowed = FALSE;
+
+  // Allow modifications if they happen inside one of the user's projects.
+  foreach ($user_projects as $project) {
+    if ($repository['repo_id'] != $project['repo_id']) {
+      continue; // the item cannot be located in this project, try the next one
+    }
+    $path = $item['path'];
+
+    if ($item['type'] == VERSIONCONTROL_ITEM_DIRECTORY && $item['path'] != '/') {
+      $path = $item['path'] .'/';
+    }
+    if (strpos($path, $project['directory'] .'/') !== FALSE) {
+      $is_allowed = TRUE;
+      break;
+    }
+  }
+  if (!$is_allowed) {
+    // All projects have been checked and continue has not yet been hit,
+    // which means the item is outside the user's projects.
+    $error_message = t(
+'** Access denied: !user does not have permission to operate on files in:
+** !directory',
+      array('!user' => $user->name, '!directory' => $directory_label)
+    ) .
+    _versioncontrol_project_get_project_error_appendix($repository, $item['path']);
+
+    return array($error_message);
+  }
+  return array();
+}
+
+function _versioncontrol_project_get_project_error_appendix($repository, $item_path) {
+  $project = versioncontrol_project_get_project_for_item($repository, $item_path);
+  if (isset($project) && $project['owner_uid'] != 0) {
+    $owner = user_load(array('uid' => $project['owner_uid']));
+  }
+  if (!$owner) {
+    return '';
+  }
+  return "\n" . t(
+'** Please contact the owner of this project
+** (!user, !user-url)
+** and request to be added as a project maintainer.',
+    array('!user' => $owner->name, '!user-url' => 'user/'. $owner->uid)
+  );
+}
+
 
 /**
  * Implementation of hook_versioncontrol_account():
