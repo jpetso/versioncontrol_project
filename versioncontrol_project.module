@@ -608,10 +608,10 @@ function versioncontrol_project_get_content_types() {
  *   Possible array elements handled by this module are:
  *
  *   - 'nids': An array of project node ids.
- *       If given, only commits for these projects will be returned.
+ *        If given, only commits for these projects will be returned.
  *   - 'maintainer_uids': An array of Drupal user ids. If given, the result set
- *       will only contain commits that correspond to one of the projects
- *       that any of the specified users maintain.
+ *        will only contain commits that correspond to one of the projects
+ *        that any of the specified users maintain.
  */
 function versioncontrol_project_get_commit_constraints($constraints, $project_constraints) {
   if (isset($project_constraints['maintainer_uids'])) {
@@ -673,7 +673,7 @@ function versioncontrol_project_get_commit_constraints($constraints, $project_co
  *   - 'repo_id': The repository id of the repository where the project resides.
  *   - 'directory': The project directory inside the repository.
  *   - 'maintainer_uids': An array containing all maintainer uids, that is,
- *                        the project owner and the co-maintainers.
+ *        the project owner and the co-maintainers.
  *   - 'comaintainer_uids': An array containing all co-maintainer uids.
  *
  *   If there is no version control data for that node, NULL is returned.
@@ -705,7 +705,7 @@ function versioncontrol_project_get_project($nid, $include_unpublished = FALSE) 
  *   - 'repo_id': The repository id of the repository where the project resides.
  *   - 'directory': The project directory inside the repository.
  *   - 'maintainer_uids': An array containing all maintainer uids, that is,
- *                        the project owner and the co-maintainers.
+ *        the project owner and the co-maintainers.
  *   - 'comaintainer_uids': An array containing all co-maintainer uids.
  *
  *   If the given user doesn't maintain at least one project,
@@ -724,12 +724,11 @@ function versioncontrol_project_get_projects_for_maintainer($uid, $include_unpub
  *   An optional array of constraints. Possible array elements are:
  *
  *   - 'nids': An array of project node ids. If given, only the corresponding
- *             projects will be returned.
+ *        projects will be returned.
  *   - 'owner_uids': An array of Drupal user ids. If given, only projects with
- *                   one of these users as project owner will be returned.
+ *        one of these users as project owner will be returned.
  *   - 'maintainer_uids': An array of Drupal user ids. If given, only projects
- *                        with at least one of these users as maintainer
- *                        will be returned.
+ *        with at least one of these users as maintainer will be returned.
  *
  * @param $include_unpublished
  *   If FALSE (which is the default), this function does not return projects
@@ -745,7 +744,7 @@ function versioncontrol_project_get_projects_for_maintainer($uid, $include_unpub
  *   - 'repo_id': The repository id of the repository where the project resides.
  *   - 'directory': The project directory inside the repository.
  *   - 'maintainer_uids': An array containing all maintainer uids, that is,
- *                        the project owner and the co-maintainers.
+ *        the project owner and the co-maintainers.
  *   - 'comaintainer_uids': An array containing all co-maintainer uids.
  *
  *   If not a single project matches these constraints,
@@ -873,7 +872,7 @@ function _versioncontrol_project_get_comaintainers($nid) {
  *   - 'repo_id': The repository id of the repository where the project resides.
  *   - 'directory': The project directory inside the repository.
  *   - 'maintainer_uids': An array containing all maintainer uids, that is,
- *                        the project owner and the co-maintainers.
+ *        the project owner and the co-maintainers.
  *   - 'comaintainer_uids': An array containing all co-maintainer uids.
  *
  *   If the item doesn't belong to any project, NULL is returned.
@@ -1003,7 +1002,7 @@ function versioncontrol_get_projects_for_commit($commit, $include_unpublished = 
  *   - 'repo_id': The repository id of the repository where the project resides.
  *   - 'directory': The project directory inside the repository.
  *   - 'comaintainer_uids': Optional. If given, the list of co-maintainer uids
- *                          will be updated with this one.
+ *        will be updated with this one.
  *
  * @return
  *   The complete project array if the project was created, or NULL if not.
@@ -1149,18 +1148,18 @@ function versioncontrol_project_versioncontrol_commit_access($commit, $commit_ac
  *   A structured array that consists of the following elements:
  *
  *   - 'branch_name': The name of the target branch
-                      (a string like 'DRUPAL-6--1').
+ *        (a string like 'DRUPAL-6--1').
  *   - 'action': Specifies what is going to happen with the branch. This is
- *               VERSIONCONTROL_ACTION_ADDED if the branch is being created,
- *               VERSIONCONTROL_ACTION_MOVED if it's being renamed,
- *               or VERSIONCONTROL_ACTION_DELETED if it is slated for deletion.
+ *        VERSIONCONTROL_ACTION_ADDED if the branch is being created,
+ *        VERSIONCONTROL_ACTION_MOVED if it's being renamed,
+ *        or VERSIONCONTROL_ACTION_DELETED if it is slated for deletion.
  *   - 'uid': The Drupal user id of the committer.
  *   - 'username': The system specific VCS username of the committer.
  *   - 'repository': The repository where the branching occurs,
- *                   given as a structured array, like the return value
- *                   of versioncontrol_get_repository().
+ *        given as a structured array, like the return value
+ *        of versioncontrol_get_repository().
  *   - 'directory': The deepest-level directory in the repository that is
- *                  common to all of the branched items.
+ *        common to all of the branched items.
  *
  * @param $branched_items
  *   An array of all items that are affected by the branching operation.
@@ -1190,16 +1189,18 @@ function versioncontrol_project_versioncontrol_branch_access($branch, $branched_
  *
  *   - 'tag_name': The name of the tag (a string like 'DRUPAL-6--1-1').
  *   - 'action': Specifies what is going to happen with the tag. This is
- *               VERSIONCONTROL_ACTION_ADDED if the tag is being created,
- *               VERSIONCONTROL_ACTION_MOVED if it's being renamed,
- *               or VERSIONCONTROL_ACTION_DELETED if it is slated for deletion.
+ *        VERSIONCONTROL_ACTION_ADDED if the tag is being created,
+ *        VERSIONCONTROL_ACTION_MOVED if it's being renamed,
+ *        or VERSIONCONTROL_ACTION_DELETED if it is slated for deletion.
  *   - 'uid': The Drupal user id of the committer.
  *   - 'username': The system specific VCS username of the committer.
  *   - 'repository': The repository where the tagging occurs,
- *                   given as a structured array, like the return value
- *                   of versioncontrol_get_repository().
- *   - 'directory': The deepest-level directory in the repository that is common
- *                  to all of the tagged items.
+ *        given as a structured array, like the return value
+ *        of versioncontrol_get_repository().
+ *   - 'directory': The deepest-level directory in the repository that is
+ *        common to all of the tagged items.
+ *   - 'message': The tag message that the user has given. If the version
+ *        control system doesn't support tag messages, this is an empty string.
  *
  * @param $tagged_items
  *   An array of all items that are affected by the tagging operation.
