@@ -23,7 +23,7 @@ function versioncontrol_project_menu($may_cache) {
       'title' => t('Project node integration'),
       'description' => t('Specify the content types that will be integrated with version control systems, and configure how this will be done.'),
       'callback' => 'drupal_get_form',
-      'callback arguments' => array('versioncontrol_project_admin'),
+      'callback arguments' => array('versioncontrol_project_admin_form'),
       'access' => $admin_access,
       'type' => MENU_LOCAL_TASK,
     );
@@ -85,7 +85,7 @@ function versioncontrol_project_menu($may_cache) {
  * Form callback for 'admin/project/versioncontrol-project':
  * Global settings for this module.
  */
-function versioncontrol_project_admin() {
+function versioncontrol_project_admin_form() {
   $form = array();
   $repositories = versioncontrol_get_repositories();
   $repository_options = array();
@@ -118,6 +118,32 @@ function versioncontrol_project_admin() {
     '#type' => 'value',
     '#value' => TRUE,
   );
+
+  if (module_exists('project') && project_use_taxonomy()) {
+    $form['type_validation'] = array(
+      '#title' => t('Validate directory by project type'),
+      '#type' => 'fieldset',
+      '#collapsible' => TRUE,
+      '#collapsed' => FALSE,
+    );
+    $form['type_validation']['versioncontrol_project_dir_validate_by_type'] = array(
+      '#title' => t('Validate directory by project type'),
+      '#type' => 'checkbox',
+      '#default_value' => variable_get('versioncontrol_project_dir_validate_by_type', 1),
+      '#description' => t('If this box is checked, the path specified in the project directory field must match the path given for the respective project type, as defined below. For each type, you can specify a PHP regular expression for allowed project directories. Example: "@^/contributions/modules/(.+)$@". If empty, all directories will be allowed for the respective project type.'),
+    );
+    $terms = taxonomy_get_tree(_project_get_vid());
+    foreach ($terms as $term) {
+      // Only use the first-level terms.
+      if ($term->depth == 0) {
+        $form['type_validation']['versioncontrol_project_directory_tid_'. $term->tid] = array(
+          '#title' => t('Directory for %term_name', array('%term_name' => $term->name)),
+          '#type' => 'textfield',
+          '#default_value' => variable_get('versioncontrol_project_directory_tid_'. $term->tid, ''),
+        );
+      }
+    }
+  }
 
   return system_settings_form($form);
 }
@@ -295,20 +321,19 @@ function versioncontrol_project_form_validate($form_id, $form_values) {
   // project.module specific. Not the most ideal place for these checks,
   // but what the hell, it doesn't hurt nobody.
   if (module_exists('project')) {
-    // TODO: admin interface
     if (project_use_taxonomy() && variable_get('versioncontrol_project_dir_validate_by_type', 1)) {
       $node = node_load($form_values['nid']);
       $project_type_tid = $node->project_type;
       $tree = taxonomy_get_term($project_type_tid);
 
-      $directory_with_slash = ($directory == '/') ? '/' : $directory .'/';
-      $dir_root = variable_get('versioncontrol_project_directory_tid_'. $project_type_tid, '/');
-      if ($dir_root[strlen($dir_root)-1] != '/') {
-        $dir_root .= '/';
-      }
-      if (strpos($directory_with_slash, $dir_root) !== FALSE) {
-        form_set_error('project_directory', t("The root of the project directory does not match the selected project type (%type). By default, spaces in the type name are converted to hyphens in the path, but custom mappings can also be defined.  Given the current project type, the first element of the directory path should be: %goal.", array('%type' => $tree->name, '%goal' => $dir_root)));
-        return;
+      $dir_regexp = variable_get('versioncontrol_project_directory_tid_'. $project_type_tid, '');
+
+      if (!empty($dir_regexp)) { // empty means "all directories allowed"
+        $directory_with_slash = ($directory == '/') ? '/' : $directory .'/';
+        if (!preg_match($dir_regexp, $directory_with_slash)) {
+          form_set_error('project_directory', t("The root of the project directory does not match the selected project type (%type). Given the current project type, the directory path should match the following regular expression: %goal.", array('%type' => $tree->name, '%goal' => $dir_regexp)));
+          return;
+        }
       }
     }
 
