@@ -282,12 +282,17 @@ function versioncontrol_project_form_alter($form_id, &$form) {
 function versioncontrol_project_form_validate($form_id, $form_values) {
   $repo_id = $form_values['repo_id'];
   $admin_access = user_access('administer version control systems');
-  $project = versioncontrol_project_get_project($form_values['nid'], TRUE);
 
-  if (!$admin_access && isset($project) && $repo_id != $project['repo_id']) {
-    form_set_error('repo_id', t('You do not have permission to modify the CVS repository for this project. (The repository can\'t be changed after the project has been created.)'));
-    return;
+  // Don't allow changing the repository after the project has been created.
+  if (is_numeric($form_values['nid'])) {
+    $project = versioncontrol_project_get_project($form_values['nid'], TRUE);
+
+    if (!$admin_access && isset($project) && $repo_id != $project['repo_id']) {
+      form_set_error('repo_id', t('You do not have permission to modify the repository for this project. (The repository can\'t be changed after the project has been created.)'));
+      return;
+    }
   }
+
   if (!$repo_id) {
     // no version control integration, we don't have to validate
     return;
@@ -321,9 +326,9 @@ function versioncontrol_project_form_validate($form_id, $form_values) {
   // project.module specific. Not the most ideal place for these checks,
   // but what the hell, it doesn't hurt nobody.
   if (module_exists('project')) {
-    if (project_use_taxonomy() && variable_get('versioncontrol_project_dir_validate_by_type', 1)) {
-      $node = node_load($form_values['nid']);
-      $project_type_tid = $node->project_type;
+    if (project_use_taxonomy() && isset($form_values['project_type'])
+        && variable_get('versioncontrol_project_dir_validate_by_type', 1)) {
+      $project_type_tid = $form_values['project_type'];
       $tree = taxonomy_get_term($project_type_tid);
 
       $dir_regexp = variable_get('versioncontrol_project_directory_tid_'. $project_type_tid, '');
