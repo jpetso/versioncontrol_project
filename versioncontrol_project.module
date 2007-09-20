@@ -8,6 +8,8 @@
  * Copyright 2006, 2007 Derek Wright ("dww" , http://drupal.org/user/46549)
  * Copyright 2007 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
+// TODO: add the "Developers" page from project.module, probably unifying it with the "Commit access" form.
+// TODO: optionally ('cvs_restrict_project_creation') restrict project creation for users that don't have a version control account.
 
 /**
  * Implementation of hook_menu().

@@ -57,7 +57,19 @@ function versioncontrol_project_install() {
  * Implementation of hook_uninstall().
  */
 function versioncontrol_project_uninstall() {
-  variable_del('versioncontrol_project_content_types');
+  // Remove variables.
+  db_query("DELETE FROM {variable} WHERE name LIKE 'versioncontrol_project_directory_tid_%'");
+  $variables = array(
+    'versioncontrol_project_content_types',
+    'versioncontrol_project_restrict_commits',
+    'versioncontrol_project_dir_validate_by_type',
+    'versioncontrol_project_validate_by_short_name',
+  );
+  foreach ($variables as $variable) {
+    variable_del($variable);
+  }
+
+  // Drop tables.
   db_query("DROP TABLE {versioncontrol_project_projects}");
   db_query("DROP TABLE {versioncontrol_project_comaintainers}");
 }
