@@ -31,8 +31,8 @@ function versioncontrol_project_menu($may_cache) {
   else {
     if (arg(0) == 'node' && is_numeric(arg(1))) {
       // If a user is viewing a project node that they own (or the user has
-      // the 'administer nodes' permission, add the 'CVS access' tab, but only
-      // if the project is associated with a repository.
+      // the 'administer nodes' permission), add the 'Commit access' tab,
+      // but only if the project is associated with a repository.
       $node = node_load(arg(1));
       if (isset($node->versioncontrol_project)) {
         $repo_id = $node->versioncontrol_project['repo_id'];
