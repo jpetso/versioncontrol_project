@@ -865,7 +865,7 @@ function versioncontrol_project_get_projects($constraints = array(), $include_un
  * Retrieve the list of all maintainers for the given project.
  *
  * @param $nid
- *   The node id of the project node for which the maintainers#
+ *   The node id of the project node for which the maintainers
  *   should be retrieved.
  *
  * @return
