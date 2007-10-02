@@ -1187,7 +1187,8 @@ function versioncontrol_project_versioncontrol_commit_access($commit, $commit_ac
  *        VERSIONCONTROL_ACTION_ADDED if the branch is being created,
  *        VERSIONCONTROL_ACTION_MOVED if it's being renamed,
  *        or VERSIONCONTROL_ACTION_DELETED if it is slated for deletion.
- *   - 'uid': The Drupal user id of the committer.
+ *   - 'uid': The Drupal user id of the committer, or 0 if no Drupal user
+ *        could be associated to the committer.
  *   - 'username': The system specific VCS username of the committer.
  *   - 'repository': The repository where the branching occurs,
  *        given as a structured array, like the return value
@@ -1226,7 +1227,8 @@ function versioncontrol_project_versioncontrol_branch_access($branch, $branched_
  *        VERSIONCONTROL_ACTION_ADDED if the tag is being created,
  *        VERSIONCONTROL_ACTION_MOVED if it's being renamed,
  *        or VERSIONCONTROL_ACTION_DELETED if it is slated for deletion.
- *   - 'uid': The Drupal user id of the committer.
+ *   - 'uid': The Drupal user id of the committer, or 0 if no Drupal user
+ *        could be associated to the committer.
  *   - 'username': The system specific VCS username of the committer.
  *   - 'repository': The repository where the tagging occurs,
  *        given as a structured array, like the return value
