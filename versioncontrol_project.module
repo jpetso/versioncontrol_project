@@ -422,6 +422,7 @@ function versioncontrol_project_commit_access_form($node) {
     '#type' => 'markup',
     '#value' => '',
     '#node' => $node, // remember that one for the '#after_build' function
+    '#repository' => $repository, // and this one as well
     '#after_build' => array('versioncontrol_project_commit_access_table'),
   );
   $form['table']['username'] = array(
@@ -446,6 +447,7 @@ function versioncontrol_project_commit_access_form($node) {
 function versioncontrol_project_commit_access_table(&$form, $form_values) {
   $node = $form['#node'];
   $project = $node->versioncontrol_project;
+  $project_repository = $form['#repository'];
 
   $rows = array();
   $header = array();
@@ -467,7 +469,7 @@ function versioncontrol_project_commit_access_table(&$form, $form_values) {
     }
 
     // Indicate any maintainers whose account is no longer approved.
-    if (!versioncontrol_is_account_approved($uid, $project['repo_id'])) {
+    if (!versioncontrol_is_account_authorized($uid, $project_repository)) {
       $username = '<del>'. theme('username', $user) .'</del> <em>('. t('repository access disabled') .')</em>';
     }
     else {
