@@ -1000,7 +1000,7 @@ function _versioncontrol_project_get_project_for_item($repo_id, $item_path, $inc
 function versioncontrol_get_projects_for_commit($commit, $include_unpublished = FALSE) {
   // First, try if the directory item itself is wholly inside a project.
   // In that case, we wouldn't need to check each item separately.
-  $commit_directory_item = versioncontrol_get_commit_directory_item($commit);
+  $commit_directory_item = versioncontrol_get_directory_item($commit);
   $project = versioncontrol_project_get_project_for_item(
     $commit['repository'], $commit['directory'], $include_unpublished
   );
