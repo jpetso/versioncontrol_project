@@ -1313,8 +1313,8 @@ function _versioncontrol_project_check_drupal_user($object, &$user) {
     $backend = $backends[$object['repository']['vcs']];
 
     $error_message = t(
-      "** ERROR: no Drupal user matches !vcs user '!user'.\n".
-      "** Please contact a !vcs administrator for help.",
+"** ERROR: no Drupal user matches !vcs user '!user'.
+** Please contact a !vcs administrator for help.",
       array('!vcs' => $backend['name'], '!user' => $object['username'])
     );
     return array($error_message);
