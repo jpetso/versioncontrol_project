@@ -22,8 +22,7 @@ function versioncontrol_project_install() {
         owner_uid int unsigned NOT NULL default '0',
         repo_id int unsigned NOT NULL default '0',
         directory varchar(255) NOT NULL default '',
-        PRIMARY KEY (nid),
-        UNIQUE KEY (repo_id, directory)
+        PRIMARY KEY (nid)
       ) /*!40100 DEFAULT CHARACTER SET utf8 */");
 
       db_query("CREATE TABLE {versioncontrol_project_comaintainers} (
@@ -39,8 +38,7 @@ function versioncontrol_project_install() {
         owner_uid int NOT NULL default '0',
         repo_id int NOT NULL default '0',
         directory varchar(255) NOT NULL default '',
-        PRIMARY KEY (nid),
-        UNIQUE (repo_id, directory)
+        PRIMARY KEY (nid)
       )");
 
       db_query("CREATE TABLE {versioncontrol_project_comaintainers} (
@@ -72,4 +70,26 @@ function versioncontrol_project_uninstall() {
   // Drop tables.
   db_query("DROP TABLE {versioncontrol_project_projects}");
   db_query("DROP TABLE {versioncontrol_project_comaintainers}");
+}
+
+
+// Update functions.
+
+function versioncontrol_project_update_1() {
+  $ret = array();
+
+  // Remove the unique key (repo_id, directory) because there can be multiple
+  // "empty" projects with keys (0, '').
+  switch ($GLOBALS['db_type']) {
+    case 'mysqli':
+    case 'mysql':
+      $ret[] = update_sql("ALTER TABLE {versioncontrol_project_projects}
+                           DROP KEY repo_id");
+      break;
+    case 'pgsql':
+      $ret[] = update_sql("ALTER TABLE {versioncontrol_project_projects}
+                           DROP CONSTRAINT {versioncontrol_project_projects}_repo_id_key");
+      break;
+  }
+  return $ret;
 }

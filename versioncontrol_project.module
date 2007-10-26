@@ -108,6 +108,13 @@ function versioncontrol_project_admin_form() {
     '#default_value' => variable_get('versioncontrol_project_restrict_commits', 1),
     '#weight' => -20,
   );
+  $form['versioncontrol_project_restrict_creation'] = array(
+    '#title' => t('Restrict project creation to users with VCS accounts'),
+    '#type' => 'checkbox',
+    '#default_value' => variable_get('versioncontrol_project_restrict_creation', 1),
+    '#description' => t('If this box is checked, only users with VCS accounts will be allowed to create project nodes.'),
+    '#weight' => -18,
+  );
 
   $form['versioncontrol_project_content_types'] = array(
     '#type' => 'checkboxes',
@@ -129,6 +136,7 @@ function versioncontrol_project_admin_form() {
       '#type' => 'fieldset',
       '#collapsible' => TRUE,
       '#collapsed' => FALSE,
+      '#weight' => -1,
     );
     $form['type_validation']['versioncontrol_project_dir_validate_by_type'] = array(
       '#title' => t('Validate directory by project type'),
@@ -166,6 +174,18 @@ function versioncontrol_project_nodeapi(&$node, $op, $arg = NULL) {
         $project = versioncontrol_project_get_project($node->nid, TRUE);
         if (isset($project)) {
           $node->versioncontrol_project = $project;
+        }
+        return;
+
+      case 'validate':
+        // Fail validation if the user doesn't have an account.
+        // This is ugly to do in the validation phase, but the only clean
+        // solution so far as node_access() doesn't provide a general hook.
+        // So, the best thing is probably to keep this as fallback and insert
+        // conditional checks in Project and similar modules.
+        global $user;
+        if (!versioncontrol_project_creation_is_allowed($user->uid)) {
+          form_set_error('nid', t('You cannot create projects without having a version control system account assigned.'));
         }
         return;
 
@@ -997,7 +1017,7 @@ function _versioncontrol_project_get_project_for_item($repo_id, $item_path, $inc
  *   The project node ids are the array keys, and the complete project arrays
  *   are given in the array values.
  */
-function versioncontrol_get_projects_for_commit($commit, $include_unpublished = FALSE) {
+function versioncontrol_project_get_projects_for_commit($commit, $include_unpublished = FALSE) {
   // First, try if the directory item itself is wholly inside a project.
   // In that case, we wouldn't need to check each item separately.
   $commit_directory_item = versioncontrol_get_directory_item($commit);
@@ -1122,6 +1142,29 @@ function versioncontrol_project_delete_project($nid) {
             WHERE nid = '%d'", $nid);
   db_query("DELETE FROM {versioncontrol_project_comaintainers}
             WHERE nid = '%d'", $nid);
+}
+
+
+/**
+ * Check if the given user may create project nodes.
+ * In case the "restrict project creation" option on the admin form is enabled
+ * and the user lacks a VCS account, project node creation is not allowed.
+ *
+ * @return
+ *   TRUE if the user may create project nodes, or FALSE otherwise.
+ */
+function versioncontrol_project_creation_is_allowed($uid) {
+  if (variable_get('versioncontrol_project_restrict_creation', 1)) {
+    if (user_access('administer nodes') || user_access('administer version control systems')) {
+      return TRUE;
+    }
+
+    $user_accounts = versioncontrol_get_accounts(array('uids' => array($uid)));
+    if (empty($user_accounts)) {
+      return FALSE;
+    }
+  }
+  return TRUE;
 }
 
 
@@ -1426,7 +1469,7 @@ function versioncontrol_project_block($op = 'list', $delta = 0) {
       // Find out which projects are affected, and how active they have been.
       $project_nids = array();
       foreach ($commits as $commit) {
-        $commit_projects = versioncontrol_get_projects_for_commit($commit);
+        $commit_projects = versioncontrol_project_get_projects_for_commit($commit);
         foreach ($commit_projects as $nid => $project) {
           $project_nids[] = $nid;
         }
