@@ -53,7 +53,7 @@ function versioncontrol_project_menu($may_cache) {
           $repository = versioncontrol_get_repository($repo_id);
 
           if (($node->uid == $user->uid && versioncontrol_is_account_authorized($user->uid, $repository))
-              || user_access('administer nodes')) {
+              || $admin_access || user_access('administer nodes')) {
             $items[] = array(
               'path' => 'node/'. $node->nid .'/commit-access',
               'title' => t('Commit access'),
