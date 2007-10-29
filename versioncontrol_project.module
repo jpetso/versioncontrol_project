@@ -8,8 +8,6 @@
  * Copyright 2006, 2007 Derek Wright ("dww" , http://drupal.org/user/46549)
  * Copyright 2007 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
-// TODO: add the "Developers" page from project.module, probably unifying it with the "Commit access" form.
-// TODO: optionally ('cvs_restrict_project_creation') restrict project creation for users that don't have a version control account.
 
 /**
  * Implementation of hook_menu().
@@ -38,6 +36,7 @@ function versioncontrol_project_menu($may_cache) {
       $node = node_load(arg(1));
       if (isset($node->versioncontrol_project)) {
         $repo_id = $node->versioncontrol_project['repo_id'];
+        $node_access = node_access('view', $node);
 
         if ($repo_id > 0) {
           $items[] = array(
@@ -45,9 +44,18 @@ function versioncontrol_project_menu($may_cache) {
             'title' => t('Commits'),
             'callback' => 'versioncontrol_project_commitlog',
             'callback arguments' => array($node),
-            'access' => TRUE,
+            'access' => $node_access,
             'type' => MENU_CALLBACK,
             'weight' => 4,
+          );
+          $items[] = array(
+            'path' => 'node/'. $node->nid .'/developers',
+            'title' => t('Developers'),
+            'callback' => 'versioncontrol_project_developers',
+            'callback arguments' => array($node),
+            'access' => $node_access,
+            'type' => MENU_CALLBACK,
+            'weight' => 6,
           );
 
           $repository = versioncontrol_get_repository($repo_id);
@@ -59,7 +67,7 @@ function versioncontrol_project_menu($may_cache) {
               'title' => t('Commit access'),
               'callback' => 'drupal_get_form',
               'callback arguments' => array('versioncontrol_project_commit_access_form', $node),
-              'access' => TRUE,
+              'access' => $node_access,
               'type' => MENU_LOCAL_TASK,
               'weight' => 5,
             );
@@ -72,8 +80,8 @@ function versioncontrol_project_menu($may_cache) {
                   'versioncontrol_project_commit_access_delete_confirm',
                   $node, $deleted_uid,
                 ),
+                'access' => $node_access,
                 'type' => MENU_CALLBACK,
-                'access' => TRUE,
               );
             }
           }
@@ -629,16 +637,98 @@ function versioncontrol_project_commit_access_delete_confirm_submit($form_id, $f
 
 
 /**
- * Callback for 'node/$nid/commitlog'
+ * Callback for "node/$nid/commitlog".
  */
 function versioncontrol_project_commitlog($node) {
+  $title = check_plain($node->title);
+  drupal_set_title(t('Commits for !title', array('!title' => $title)));
+
   if ($node->type == 'project_project') {
-    project_project_set_breadcrumb($node, array(l($node->title, 'node/'. $node->nid)));
+    project_project_set_breadcrumb($node, array(l($title, 'node/'. $node->nid)));
   }
 
   $_REQUEST['nids'] = (string) $node->nid;
-  drupal_set_title(t('Commits for @title', array('@title' => $node->title)));
   return commitlog_page();
+}
+
+/**
+ * Callback for "node/$nid/developers".
+ */
+function versioncontrol_project_developers($node) {
+  $title = check_plain($node->title);
+  drupal_set_title(t('Developers for !title', array('!title' => $title)));
+
+  if (module_exists('project')) {
+    project_project_set_breadcrumb($node, array(l($title, 'node/'. $node->nid)));
+  }
+
+  $project = $node->versioncontrol_project;
+  $constraints = versioncontrol_project_get_commit_constraints(
+    array(), array('nids' => array($project['nid']))
+  );
+  return theme('versioncontrol_user_statistics', $constraints);
+}
+
+/**
+ * Implementation of hook_user():
+ * Add a list of projects to the user page that the user has committed to.
+ */
+function versioncontrol_project_user($type, &$edit, &$user, $category = NULL) {
+  if ($type == 'view') {
+    $constraints = array('uids' => array($user->uid));
+    $statistics = versioncontrol_project_get_statistics($constraints);
+    $project_titles = array();
+
+    foreach ($statistics as $project_stats) {
+      $nid = $project_stats['project']['nid'];
+      $project_name = l(check_plain($project_stats['name']), 'node/'. $nid);
+      $number_commits_text = format_plural(
+        $project_stats['number_commits'], '1 commit', '@count commits'
+      );
+
+      $project_titles[] = array(
+        'value' => t('!project-name (!how-many-commits)', array(
+          '!project-name' => $project_name,
+          '!how-many-commits' => $number_commits_text,
+        )),
+      );
+    }
+    if (!empty($project_titles)) {
+      return array(t('Projects') => $project_titles);
+    }
+  }
+}
+
+/**
+ * Implementation of hook_block(): Present a list of the most active projects.
+ */
+function versioncontrol_project_block($op = 'list', $delta = 0) {
+  if ($op == 'list') {
+    $blocks[0]['info'] = t('Most active projects');
+    return $blocks;
+  }
+  else if ($op == 'view') {
+    if ($delta == 0) {
+      $interval = 7 * 24 * 60 * 60;
+      $limit = 15;
+
+      $constraints = array('date_lower' => time() - $interval);
+      $statistics = versioncontrol_project_get_statistics($constraints, $limit);
+      $project_titles = array();
+
+      foreach ($statistics as $project_stats) {
+        $nid = $project_stats['project']['nid'];
+        $project_titles[] = l(check_plain($project_stats['name']), 'node/'. $nid);
+      }
+      if (!empty($project_titles)) {
+        $block = array(
+          'subject' => t('Most active projects'),
+          'content' => theme('item_list', $project_titles),
+        );
+        return $block;
+      }
+    }
+  }
 }
 
 
@@ -1449,73 +1539,111 @@ function versioncontrol_project_versioncontrol_account($op, $uid, $username, $re
 
 
 /**
- * Implementation of hook_block(): Present a list of the most active projects.
+ * Retrieve statistics about projects from a set of commits.
+ *
+ * @param $constraints
+ *   The constraints (as passed to versioncontrol_get_commits()) that define
+ *   which commits are taken into consideration for the statistics.
+ * @param $limit
+ *   If given, only the n most active projects (in terms of commits)
+ *   will be included in the result.
+ *
+ * @return
+ *   An array of information about the projects. Each element contains
+ *   one project's statistics and consists of the following elements:
+ *   - 'project': The project array, as returned
+ *        by versioncontrol_project_get_project().
+ *   - 'name': The title of the project node.
+ *   - 'number_commits': The number of commits to this project
+ *        (out of the given commits).
+ *   - 'first_commit': The commit array of the first commit to this project
+ *        (out of the given commits).
+ *   - 'last_commit': The commit array of the last commit to this project
+ *        (out of the given commits).
+ *
+ *   The array is sorted in descending order of the commit count,
+ *   in other words, the first item corresponds to the most active project.
+ *   If no commits matching the given constraints can be found or no projects
+ *   were affected by this set of commits, an empty array is returned.
  */
-function versioncontrol_project_block($op = 'list', $delta = 0) {
-  if ($op == 'list') {
-    $blocks[0]['info'] = t('Most active projects');
-    return $blocks;
-  }
-  else if ($op == 'view') {
-    if ($delta == 0) {
-      $interval = 7 * 24 * 60 * 60;
-      $length = 15;
-      $project_counts = array();
+function versioncontrol_project_get_statistics($constraints, $limit = NULL) {
+  $projects = array();
+  $project_nids = array();
+  $first_commits = array();
+  $last_commits = array();
 
-      $commits = versioncontrol_get_commits(array(
-        'date_lower' => time() - $interval,
-      ));
+  $commits = versioncontrol_get_commits($constraints);
 
-      // Find out which projects are affected, and how active they have been.
-      $project_nids = array();
-      foreach ($commits as $commit) {
-        $commit_projects = versioncontrol_project_get_projects_for_commit($commit);
-        foreach ($commit_projects as $nid => $project) {
-          $project_nids[] = $nid;
-        }
-      }
+  // Find out which projects are affected, and how active they have been.
+  foreach ($commits as $commit) {
+    $commit_projects = versioncontrol_project_get_projects_for_commit($commit);
+    foreach ($commit_projects as $nid => $project) {
+      $projects[$nid] = $project;
+      $project_nids[] = $nid;
 
-      // Determine the n most active projects.
-      $project_counts = array_count_values($project_nids);
+      // Write the first commit for each iteration, the last one encountered is
+      // the first one in time. ($commits is sorted reverse chronologically.)
+      $first_commits[$nid] = $commit;
 
-      arsort($project_counts);
-      $limited_project_counts = array();
-      $i = 0;
-      foreach ($project_counts as $nid => $count) {
-        if ($i >= $length) {
-          break;
-        }
-        $limited_project_counts[$nid] = $count;
-        ++$i;
-      }
-      $project_nids = array_keys($limited_project_counts);
-
-      // Ok, now construct a query and get the desired node titles
-      if (empty($project_nids)) {
-        return;
-      }
-      $nid_constraints = array();
-
-      foreach ($project_nids as $nid) {
-        $nid_constraints[] = "nid = '%d'";
-      }
-      $result = db_query('SELECT nid, title FROM {node}
-                          WHERE '. implode(' OR ', $nid_constraints),
-                          $project_nids);
-
-      while ($node = db_fetch_object($result)) {
-        $count = $limited_project_counts[$node->nid];
-        $project_titles[$count] = l($node->title, 'node/'. $node->nid);
-      }
-      if ($project_titles) {
-        krsort($project_titles);
-        $project_titles = array_values($project_titles);
-        $block = array(
-          'subject' => t('Most active projects'),
-          'content' => theme('item_list', $project_titles),
-        );
-        return $block;
+      // Similar for the last commit which is the first one that we get to see.
+      if (!isset($last_commits[$nid])) {
+        $last_commits[$nid] = $commit;
       }
     }
   }
+
+  // Sort by commit count.
+  $commit_counts = array_count_values($project_nids);
+  arsort($commit_counts);
+
+  // Sort by commit count, and if requested by the caller,
+  // limit the output to the n most active projects.
+  $limited_commit_counts = array();
+  $i = 0;
+  foreach ($commit_counts as $nid => $count) {
+    if (isset($limit) && $i >= $limit) {
+      break;
+    }
+    $limited_commit_counts[$nid] = $count;
+    ++$i;
+  }
+  $commit_counts = $limited_commit_counts;
+  $project_nids = array_unique(array_keys($limited_commit_counts));
+
+  // No projects in the result, so we can return right now.
+  if (empty($project_nids)) {
+    return array();
+  }
+
+  // Ok, now construct a query and get the desired node titles
+  $placeholders = array();
+  foreach ($project_nids as $nid) {
+    $placeholders[] = '%d';
+  }
+  $result = db_query('SELECT nid, title FROM {node}
+                      WHERE nid IN ('. implode(',', $placeholders) .')',
+                      $project_nids);
+  $statistics = array();
+
+  while ($node = db_fetch_object($result)) {
+    $statistics[$node->nid] = array(
+      'project' => $projects[$node->nid],
+      'name' => $node->title,
+      'number_commits' => $commit_counts[$node->nid],
+      'first_commit' => $first_commits[$node->nid],
+      'last_commit' => $last_commits[$node->nid],
+    );
+  }
+
+  if (empty($statistics)) {
+    return array();
+  }
+
+  $sorted_statistics = array();
+  foreach ($project_nids as $nid) { // the $project_nids array is already in the right order
+    if (isset($statistics[$nid])) {
+      $sorted_statistics[] = $statistics[$nid];
+    }
+  }
+  return $sorted_statistics;
 }
