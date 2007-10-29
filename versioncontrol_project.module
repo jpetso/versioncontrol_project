@@ -629,8 +629,8 @@ function versioncontrol_project_commit_access_delete_confirm_submit($form_id, $f
   $nid = $form_values['nid'];
   $uid = $form_values['uid'];
   $user = user_load(array('uid' => $uid));
-  db_query("DELETE FROM {versioncontrol_project_comaintainers}
-            WHERE nid = '%d' AND uid = '%d'", $nid, $uid);
+  db_query('DELETE FROM {versioncontrol_project_comaintainers}
+            WHERE nid = %d AND uid = %d', $nid, $uid);
   drupal_set_message(t('Commit access for !user has been deleted.', array('!user' => theme('username', $user))));
   return 'node/'. $nid .'/commit-access';
 }
@@ -915,7 +915,7 @@ function versioncontrol_project_get_projects($constraints = array(), $include_un
   if (isset($constraints['nids'])) {
     $or_constraints = array();
     foreach ($constraints['nids'] as $nid) {
-      $or_constraints[] = "p.nid = '%d'";
+      $or_constraints[] = 'p.nid = %d';
       $params[] = $nid;
     }
     $and_constraints[] = implode(' OR ', $or_constraints);
@@ -924,7 +924,7 @@ function versioncontrol_project_get_projects($constraints = array(), $include_un
   // project owner constraints
   if (isset($constraints['owner_uids'])) {
     foreach ($constraints['owner_uids'] as $uid) {
-      $or_constraints[] = "p.owner_uid = '%d'";
+      $or_constraints[] = 'p.owner_uid = %d';
       $params[] = $uid;
     }
     $and_constraints[] = implode(' OR ', $or_constraints);
@@ -936,9 +936,9 @@ function versioncontrol_project_get_projects($constraints = array(), $include_un
                          ON p.nid = c.nid';
 
     foreach ($constraints['maintainer_uids'] as $uid) {
-      $or_constraints[] = "p.owner_uid = '%d'";
+      $or_constraints[] = 'p.owner_uid = %d';
       $params[] = $uid;
-      $or_constraints[] = "c.uid = '%d'";
+      $or_constraints[] = 'c.uid = %d';
       $params[] = $uid;
     }
     $and_constraints[] = implode(' OR ', $or_constraints);
@@ -985,9 +985,9 @@ function versioncontrol_project_get_projects($constraints = array(), $include_un
  *   one maintainer for each project (the node owner).
  */
 function _versioncontrol_project_get_comaintainers($nid) {
-  $result = db_query("SELECT uid
+  $result = db_query('SELECT uid
                       FROM {versioncontrol_project_comaintainers} c
-                      WHERE nid = '%d'", $nid);
+                      WHERE nid = %d', $nid);
 
   $maintainers = array();
   while ($maintainer = db_fetch_object($result)) {
@@ -1051,7 +1051,7 @@ function _versioncontrol_project_get_project_for_item($repo_id, $item_path, $inc
       $result = db_query("SELECT p.nid, p.owner_uid, p.repo_id, p.directory
                           FROM {versioncontrol_project_projects} p
                            INNER JOIN {node} n ON p.nid = n.nid
-                          WHERE p.repo_id = '%d' AND p.directory = '%s'".
+                          WHERE p.repo_id = %d AND p.directory = '%s'".
                           ($include_unpublished ? '' : ' AND n.status = 1'),
                           $repo_id, $current_path);
 
@@ -1158,7 +1158,7 @@ function versioncontrol_project_set_project($project) {
     versioncontrol_project_delete_project($project['nid']);
     db_query("INSERT INTO {versioncontrol_project_projects}
               (nid, owner_uid, repo_id, directory)
-              VALUES ('%d', '%d', '%d', '%s')",
+              VALUES (%d, %d, %d, '%s')",
               $project['nid'], 0, 0, '');
     return $project;
   }
@@ -1173,27 +1173,27 @@ function versioncontrol_project_set_project($project) {
   }
 
   // If the entry already exists, delete it.
-  db_query("DELETE FROM {versioncontrol_project_projects}
-            WHERE nid = '%d'", $project['nid']);
+  db_query('DELETE FROM {versioncontrol_project_projects}
+            WHERE nid = %d', $project['nid']);
 
   db_query("INSERT INTO {versioncontrol_project_projects}
             (nid, owner_uid, repo_id, directory)
-            VALUES ('%d', '%d', '%d', '%s')",
+            VALUES (%d, %d, %d, '%s')",
             $project['nid'], $project['owner_uid'],
             $project['repo_id'], $project['directory']);
 
   if (isset($project['comaintainer_uids'])) {
     // Delete the list, so we can easily insert them.
-    db_query("DELETE FROM {versioncontrol_project_comaintainers}
-              WHERE nid = '%d'", $project['nid']);
+    db_query('DELETE FROM {versioncontrol_project_comaintainers}
+              WHERE nid = %d', $project['nid']);
 
     // Insert each comaintainer into the database.
     foreach ($project['comaintainer_uids'] as $uid) {
       if ($uid == $project['owner_uid']) {
         continue; // the owner is not a co-maintainer
       }
-      db_query("INSERT INTO {versioncontrol_project_comaintainers} (nid, uid)
-                VALUES ('%d', '%d')", $project['nid'], $uid);
+      db_query('INSERT INTO {versioncontrol_project_comaintainers} (nid, uid)
+                VALUES (%d, %d)', $project['nid'], $uid);
     }
   }
   else {
@@ -1220,18 +1220,18 @@ function versioncontrol_project_set_project($project) {
  *   should be deleted.
  */
 function versioncontrol_project_delete_project($nid) {
-  $count = db_result(db_query("SELECT COUNT(*) FROM {versioncontrol_project_projects}
-                               WHERE nid = '%d'", $nid));
+  $count = db_result(db_query('SELECT COUNT(*) FROM {versioncontrol_project_projects}
+                               WHERE nid = %d', $nid));
   if (!$count) {
     return; // nothing to delete
   }
 
   // Deletion hooks, if any, will go here.
 
-  db_query("DELETE FROM {versioncontrol_project_projects}
-            WHERE nid = '%d'", $nid);
-  db_query("DELETE FROM {versioncontrol_project_comaintainers}
-            WHERE nid = '%d'", $nid);
+  db_query('DELETE FROM {versioncontrol_project_projects}
+            WHERE nid = %d', $nid);
+  db_query('DELETE FROM {versioncontrol_project_comaintainers}
+            WHERE nid = %d', $nid);
 }
 
 
@@ -1530,10 +1530,10 @@ function _versioncontrol_project_get_project_error_appendix($repository, $item_p
 function versioncontrol_project_versioncontrol_account($op, $uid, $username, $repository, $additional_data = array()) {
   if ($op == 'delete') {
     db_query("UPDATE {versioncontrol_project_projects}
-              SET repo_id = '0', owner_uid = '0', directory = ''
-              WHERE owner_uid = '%d'", $uid);
+              SET repo_id = 0, owner_uid = 0, directory = ''
+              WHERE owner_uid = %d", $uid);
     db_query("DELETE FROM {versioncontrol_project_comaintainers}
-              WHERE uid = '%d'", $uid);
+              WHERE uid = %d", $uid);
   }
 }
 

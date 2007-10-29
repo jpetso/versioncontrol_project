@@ -18,32 +18,32 @@ function versioncontrol_project_install() {
     case 'mysqli':
     case 'mysql':
       db_query("CREATE TABLE {versioncontrol_project_projects} (
-        nid int unsigned NOT NULL default '0',
-        owner_uid int unsigned NOT NULL default '0',
-        repo_id int unsigned NOT NULL default '0',
+        nid int unsigned NOT NULL default 0,
+        owner_uid int unsigned NOT NULL default 0,
+        repo_id int unsigned NOT NULL default 0,
         directory varchar(255) NOT NULL default '',
         PRIMARY KEY (nid)
       ) /*!40100 DEFAULT CHARACTER SET utf8 */");
 
       db_query("CREATE TABLE {versioncontrol_project_comaintainers} (
-        nid int unsigned NOT NULL default '0',
-        uid int unsigned NOT NULL default '0',
+        nid int unsigned NOT NULL default 0,
+        uid int unsigned NOT NULL default 0,
         PRIMARY KEY (nid, uid)
       ) /*!40100 DEFAULT CHARACTER SET utf8 */");
       break;
 
     case 'pgsql':
       db_query("CREATE TABLE {versioncontrol_project_projects} (
-        nid int NOT NULL default '0',
-        owner_uid int NOT NULL default '0',
-        repo_id int NOT NULL default '0',
+        nid int NOT NULL default 0,
+        owner_uid int NOT NULL default 0,
+        repo_id int NOT NULL default 0,
         directory varchar(255) NOT NULL default '',
         PRIMARY KEY (nid)
       )");
 
       db_query("CREATE TABLE {versioncontrol_project_comaintainers} (
-        nid int NOT NULL default '0',
-        uid int NOT NULL default '0',
+        nid int NOT NULL default 0,
+        uid int NOT NULL default 0,
         PRIMARY KEY (nid, uid)
       )");
       break;
@@ -60,6 +60,7 @@ function versioncontrol_project_uninstall() {
   $variables = array(
     'versioncontrol_project_content_types',
     'versioncontrol_project_restrict_commits',
+    'versioncontrol_project_restrict_creation',
     'versioncontrol_project_dir_validate_by_type',
     'versioncontrol_project_validate_by_short_name',
   );
@@ -68,8 +69,8 @@ function versioncontrol_project_uninstall() {
   }
 
   // Drop tables.
-  db_query("DROP TABLE {versioncontrol_project_projects}");
-  db_query("DROP TABLE {versioncontrol_project_comaintainers}");
+  db_query('DROP TABLE {versioncontrol_project_projects}');
+  db_query('DROP TABLE {versioncontrol_project_comaintainers}');
 }
 
 
