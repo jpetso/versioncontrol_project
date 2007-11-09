@@ -913,38 +913,51 @@ function versioncontrol_project_get_projects($constraints = array(), $include_un
 
   // project node constraints
   if (isset($constraints['nids'])) {
-    $or_constraints = array();
-    foreach ($constraints['nids'] as $nid) {
-      $or_constraints[] = 'p.nid = %d';
-      $params[] = $nid;
+    if (empty($constraints['nids'])) {
+      $and_constraints[] = 'FALSE';
     }
-    $and_constraints[] = implode(' OR ', $or_constraints);
+    else {
+      $or_constraints = array();
+      foreach ($constraints['nids'] as $nid) {
+        $or_constraints[] = 'p.nid = %d';
+        $params[] = $nid;
+      }
+      $and_constraints[] = implode(' OR ', $or_constraints);
+    }
   }
 
   // project owner constraints
   if (isset($constraints['owner_uids'])) {
-    foreach ($constraints['owner_uids'] as $uid) {
-      $or_constraints[] = 'p.owner_uid = %d';
-      $params[] = $uid;
+    if (empty($constraints['owner_uids'])) {
+      $and_constraints[] = 'FALSE';
     }
-    $and_constraints[] = implode(' OR ', $or_constraints);
+    else {
+      foreach ($constraints['owner_uids'] as $uid) {
+        $or_constraints[] = 'p.owner_uid = %d';
+        $params[] = $uid;
+      }
+      $and_constraints[] = implode(' OR ', $or_constraints);
+    }
   }
 
   // project maintainer (= owner or co-maintainer) constraints
+  $maintainer_join = '';
   if (isset($constraints['maintainer_uids'])) {
-    $maintainer_join = ' LEFT JOIN {versioncontrol_project_comaintainers} c
-                         ON p.nid = c.nid';
-
-    foreach ($constraints['maintainer_uids'] as $uid) {
-      $or_constraints[] = 'p.owner_uid = %d';
-      $params[] = $uid;
-      $or_constraints[] = 'c.uid = %d';
-      $params[] = $uid;
+    if (empty($constraints['maintainer_uids'])) {
+      $and_constraints[] = 'FALSE';
     }
-    $and_constraints[] = implode(' OR ', $or_constraints);
-  }
-  else {
-    $maintainer_join = '';
+    else {
+      $maintainer_join = ' LEFT JOIN {versioncontrol_project_comaintainers} c
+                          ON p.nid = c.nid';
+
+      foreach ($constraints['maintainer_uids'] as $uid) {
+        $or_constraints[] = 'p.owner_uid = %d';
+        $params[] = $uid;
+        $or_constraints[] = 'c.uid = %d';
+        $params[] = $uid;
+      }
+      $and_constraints[] = implode(' OR ', $or_constraints);
+    }
   }
 
   $where = empty($and_constraints) ? '' : ' WHERE '. implode(' AND ', $and_constraints);
