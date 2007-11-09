@@ -648,7 +648,7 @@ function versioncontrol_project_commitlog($node) {
   }
 
   $_REQUEST['nids'] = (string) $node->nid;
-  return commitlog_page();
+  return commitlog_commits_page();
 }
 
 /**
@@ -1037,13 +1037,9 @@ function _versioncontrol_project_get_comaintainers($nid) {
  *   If the item doesn't belong to any project, NULL is returned.
  */
 function versioncontrol_project_get_project_for_item($repository, $item_path, $include_unpublished = FALSE) {
-  return _versioncontrol_project_get_project_for_item(
-    $repository['repo_id'], $item_path, $include_unpublished
-  );
-}
-
-function _versioncontrol_project_get_project_for_item($repo_id, $item_path, $include_unpublished = FALSE) {
   static $projects_for_item = array();
+  $repo_id = $repository['repo_id'];
+
   if (!isset($projects_for_item[$repo_id])) {
     $projects_for_item[$repo_id] = array();
   }
@@ -1313,7 +1309,7 @@ function versioncontrol_project_versioncontrol_commit_access($commit, $commit_ac
   foreach ($commit_actions as $path => $action) {
     $item = versioncontrol_get_affected_item($action);
     $error_messages = _versioncontrol_project_check_item_access(
-      $commit['repository'], $item, $user, $commit['directory']
+      $commit['repository'], $item, $user, $commit['directory'], TRUE
     );
     if (!empty($error_messages)) {
       return $error_messages;
@@ -1425,7 +1421,7 @@ function _versioncontrol_project_branch_or_tag_access($branch_or_tag, $items) {
   // are maintained by the user.
   foreach ($items as $item) {
     $error_messages = _versioncontrol_project_check_item_access(
-      $branch_or_tag['repository'], $item, $user, $branch_or_tag['directory']
+      $branch_or_tag['repository'], $item, $user, $branch_or_tag['directory'], FALSE
     );
     if (!empty($error_messages)) {
       return $error_messages;
@@ -1480,30 +1476,22 @@ function _versioncontrol_project_check_drupal_user($object, &$user) {
  *   The author who tries to commit/branch/tag this item.
  * @param $directory_label
  *   The directory that is being shown in the error message.
+ * @param $default_item_access
+ *   Determines if items may be accessed if they don't belong to any project.
+ *   TRUE if unassociated items may be accessed, or FALSE if not.
  *
  * @return
  *   An empty array if the item is inside one of the user's projects,
  *   or an array filled with an error message if it isn't.
  */
-function _versioncontrol_project_check_item_access($repository, $item, $user, $directory_label) {
-  $user_projects = versioncontrol_project_get_projects_for_maintainer($user->uid);
-  $is_allowed = FALSE;
+function _versioncontrol_project_check_item_access($repository, $item, $user, $directory_label, $default_item_access) {
+  $is_allowed = $default_item_access;
+  $project = versioncontrol_project_get_project_for_item($repository, $item['path']);
 
-  // Allow modifications if they happen inside one of the user's projects.
-  foreach ($user_projects as $project) {
-    if ($repository['repo_id'] != $project['repo_id']) {
-      continue; // the item cannot be located in this project, try the next one
-    }
-    $path = $item['path'];
+  $is_allowed = isset($project)
+                ? in_array($user->uid, $project['maintainer_uids'])
+                : $default_item_access;
 
-    if ($item['type'] == VERSIONCONTROL_ITEM_DIRECTORY && $item['path'] != '/') {
-      $path = $item['path'] .'/';
-    }
-    if (strpos($path, $project['directory'] .'/') !== FALSE) {
-      $is_allowed = TRUE;
-      break;
-    }
-  }
   if (!$is_allowed) {
     // All projects have been checked and continue has not yet been hit,
     // which means the item is outside the user's projects.
@@ -1512,15 +1500,14 @@ function _versioncontrol_project_check_item_access($repository, $item, $user, $d
 ** !directory',
       array('!user' => $user->name, '!directory' => $directory_label)
     ) .
-    _versioncontrol_project_get_project_error_appendix($repository, $item['path']);
+    _versioncontrol_project_get_project_error_appendix($project);
 
     return array($error_message);
   }
   return array();
 }
 
-function _versioncontrol_project_get_project_error_appendix($repository, $item_path) {
-  $project = versioncontrol_project_get_project_for_item($repository, $item_path);
+function _versioncontrol_project_get_project_error_appendix($project = NULL) {
   if (isset($project) && $project['owner_uid'] != 0) {
     $owner = user_load(array('uid' => $project['owner_uid']));
   }
