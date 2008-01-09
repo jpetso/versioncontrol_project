@@ -124,20 +124,6 @@ function versioncontrol_project_admin_form() {
     '#weight' => -18,
   );
 
-  $form['versioncontrol_project_content_types'] = array(
-    '#type' => 'checkboxes',
-    '#title' => t('Project node content types'),
-    '#description' => t('The content types that you specify here will be enhanced with version control capabilities.'),
-    '#default_value' => versioncontrol_project_get_content_types(),
-    '#options' => node_get_types('names'),
-    '#weight' => -10,
-  );
-  // only store checked checkbox keys
-  $form['array_filter'] = array(
-    '#type' => 'value',
-    '#value' => TRUE,
-  );
-
   if (module_exists('project') && project_use_taxonomy()) {
     $form['type_validation'] = array(
       '#title' => t('Validate directory by project type'),
@@ -176,7 +162,7 @@ function versioncontrol_project_admin_form() {
  * is being deleted.
  */
 function versioncontrol_project_nodeapi(&$node, $op, $arg = NULL) {
-  if (in_array($node->type, versioncontrol_project_get_content_types())) {
+  if ($node->type == 'project_project') {
     switch ($op) {
       case 'load':
         $project = versioncontrol_project_get_project($node->nid, TRUE);
@@ -236,7 +222,7 @@ function versioncontrol_project_nodeapi(&$node, $op, $arg = NULL) {
  */
 function versioncontrol_project_form_alter($form_id, &$form) {
   if (isset($form['#id']) && $form['#id'] == 'node-form'
-      && in_array($form['#node']->type, versioncontrol_project_get_content_types()))
+      && $form['#node']->type == 'project_project')
   {
     $node = $form['#node'];
     $project = isset($node->versioncontrol_project) ? $node->versioncontrol_project : NULL;
@@ -729,15 +715,6 @@ function versioncontrol_project_block($op = 'list', $delta = 0) {
       }
     }
   }
-}
-
-
-
-/**
- * Return all content types that are marked as "project node" types.
- */
-function versioncontrol_project_get_content_types() {
-  return variable_get('versioncontrol_project_content_types', array());
 }
 
 /**

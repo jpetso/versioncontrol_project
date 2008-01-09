@@ -59,7 +59,6 @@ function versioncontrol_project_uninstall() {
   // Remove variables.
   db_query("DELETE FROM {variable} WHERE name LIKE 'versioncontrol_project_directory_tid_%'");
   $variables = array(
-    'versioncontrol_project_content_types',
     'versioncontrol_project_restrict_commits',
     'versioncontrol_project_restrict_creation',
     'versioncontrol_project_dir_validate_by_type',
