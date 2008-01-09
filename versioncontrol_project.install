@@ -19,7 +19,6 @@ function versioncontrol_project_install() {
     case 'mysql':
       db_query("CREATE TABLE {versioncontrol_project_projects} (
         nid int unsigned NOT NULL default 0,
-        owner_uid int unsigned NOT NULL default 0,
         repo_id int unsigned NOT NULL default 0,
         directory varchar(255) NOT NULL default '',
         PRIMARY KEY (nid),
@@ -36,7 +35,6 @@ function versioncontrol_project_install() {
     case 'pgsql':
       db_query("CREATE TABLE {versioncontrol_project_projects} (
         nid int NOT NULL default 0,
-        owner_uid int NOT NULL default 0,
         repo_id int NOT NULL default 0,
         directory varchar(255) NOT NULL default '',
         PRIMARY KEY (nid)
@@ -99,5 +97,13 @@ function versioncontrol_project_update_1() {
                            ON {versioncontrol_project_projects} (repo_id, directory)');
       break;
   }
+  return $ret;
+}
+
+function versioncontrol_project_update_2() {
+  $ret = array();
+
+  // Remove the owner_uid column.
+  $ret[] = update_sql('ALTER TABLE {versioncontrol_project_projects} DROP COLUMN owner_uid');
   return $ret;
 }

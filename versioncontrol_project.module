@@ -933,7 +933,7 @@ function versioncontrol_project_get_projects($constraints = array(), $include_un
     }
     else {
       foreach ($constraints['owner_uids'] as $uid) {
-        $or_constraints[] = 'p.owner_uid = %d';
+        $or_constraints[] = 'n.uid = %d';
         $params[] = $uid;
       }
       $and_constraints[] = implode(' OR ', $or_constraints);
@@ -951,7 +951,7 @@ function versioncontrol_project_get_projects($constraints = array(), $include_un
                           ON p.nid = c.nid';
 
       foreach ($constraints['maintainer_uids'] as $uid) {
-        $or_constraints[] = 'p.owner_uid = %d';
+        $or_constraints[] = 'n.uid = %d';
         $params[] = $uid;
         $or_constraints[] = 'c.uid = %d';
         $params[] = $uid;
@@ -962,7 +962,7 @@ function versioncontrol_project_get_projects($constraints = array(), $include_un
 
   $where = empty($and_constraints) ? '' : ' WHERE '. implode(' AND ', $and_constraints);
 
-  $result = db_query('SELECT DISTINCT(p.nid), p.owner_uid, p.repo_id, p.directory
+  $result = db_query('SELECT DISTINCT(p.nid), n.uid, p.repo_id, p.directory
                       FROM {versioncontrol_project_projects} p
                        INNER JOIN {node} n ON p.nid = n.nid'.
                       $maintainer_join . $where, $params);
@@ -973,11 +973,11 @@ function versioncontrol_project_get_projects($constraints = array(), $include_un
 
     $projects[$project->nid] = array(
       'nid'             => $project->nid,
-      'owner_uid'       => $project->owner_uid,
+      'owner_uid'       => $project->uid,
       'repo_id'         => $project->repo_id,
       'directory'       => $project->directory,
       'maintainer_uids' => array_merge(
-        array($project->owner_uid), $comaintainers
+        array($project->uid), $comaintainers
       ),
       'comaintainer_uids' => $comaintainers,
     );
@@ -1057,7 +1057,7 @@ function versioncontrol_project_get_project_for_item($repository, $item_path, $i
       $project_for_item = $projects_for_item[$repo_id][$current_path];
     }
     else {
-      $result = db_query("SELECT p.nid, p.owner_uid, p.repo_id, p.directory
+      $result = db_query("SELECT p.nid, n.uid, p.repo_id, p.directory
                           FROM {versioncontrol_project_projects} p
                            INNER JOIN {node} n ON p.nid = n.nid
                           WHERE p.repo_id = %d AND p.directory = '%s'".
@@ -1069,11 +1069,11 @@ function versioncontrol_project_get_project_for_item($repository, $item_path, $i
 
         $project_for_item = array(
           'nid'             => $project->nid,
-          'owner_uid'       => $project->owner_uid,
+          'owner_uid'       => $project->uid,
           'repo_id'         => $project->repo_id,
           'directory'       => $project->directory,
           'maintainer_uids' => array_merge(
-            array($project->owner_uid), $comaintainers
+            array($project->uid), $comaintainers
           ),
           'comaintainer_uids' => $comaintainers,
         );
@@ -1166,9 +1166,9 @@ function versioncontrol_project_set_project($project) {
   if ($project['repo_id'] == 0) { // "don't use version control integration"
     versioncontrol_project_delete_project($project['nid']);
     db_query("INSERT INTO {versioncontrol_project_projects}
-              (nid, owner_uid, repo_id, directory)
-              VALUES (%d, %d, %d, '%s')",
-              $project['nid'], 0, 0, '');
+              (nid, repo_id, directory)
+              VALUES (%d, %d, '%s')",
+              $project['nid'], 0, '');
     return $project;
   }
 
@@ -1186,10 +1186,9 @@ function versioncontrol_project_set_project($project) {
             WHERE nid = %d', $project['nid']);
 
   db_query("INSERT INTO {versioncontrol_project_projects}
-            (nid, owner_uid, repo_id, directory)
-            VALUES (%d, %d, %d, '%s')",
-            $project['nid'], $project['owner_uid'],
-            $project['repo_id'], $project['directory']);
+            (nid, repo_id, directory)
+            VALUES (%d, %d, '%s')",
+            $project['nid'], $project['repo_id'], $project['directory']);
 
   if (isset($project['comaintainer_uids'])) {
     // Delete the list, so we can easily insert them.
@@ -1529,9 +1528,6 @@ function _versioncontrol_project_get_project_error_appendix($project = NULL) {
  */
 function versioncontrol_project_versioncontrol_account($op, $uid, $username, $repository, $additional_data = array()) {
   if ($op == 'delete') {
-    db_query("UPDATE {versioncontrol_project_projects}
-              SET repo_id = 0, owner_uid = 0, directory = ''
-              WHERE owner_uid = %d", $uid);
     db_query("DELETE FROM {versioncontrol_project_comaintainers}
               WHERE uid = %d", $uid);
   }
