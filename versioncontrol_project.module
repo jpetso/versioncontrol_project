@@ -9,6 +9,8 @@
  * Copyright 2007 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
 
+include_once(drupal_get_path('module', 'versioncontrol_project') .'/versioncontrol_project.metrics.inc');
+ 
 /**
  * Implementation of hook_enable().
  */
