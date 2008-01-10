@@ -223,8 +223,8 @@ function update_progress_page_nojs() {
     ob_end_clean();
   }
   else {
-    // Abort the update if the needed tables don't exist.
-    if (!db_table_exists('versioncontrol_project_comaintainers') || !db_table_exists('versioncontrol_project_projects')) {
+    // Abort the update if the necessary modules aren't installed.
+    if (!module_exists('versioncontrol') || !module_exists('versioncontrol_project')) {
       print update_finished_page(FALSE);
       return NULL;
     }
