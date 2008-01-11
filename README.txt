@@ -1,19 +1,18 @@
 $Id$
 
 Version Control / Project Node Integration -
-Integrates nodes of any content type with version control systems
-supported by the Version Control API.
+Integrates project nodes (provided by the Project module)
+with version control systems supported by the Version Control API.
 
 
 SHORT DESCRIPTION
 -----------------
-This module makes it possible for users with a VCS account to
-associate Drupal nodes ("project nodes") with repository locations and
-appoint co-maintainers for these projects, which enables commit access control
-based on project maintainership.
+This module makes it possible for users with a VCS account to associate
+project nodes with repository locations and appoint co-maintainers for these
+projects, which enables commit access control based on project maintainership.
 
 Version Control / Project Node Integration depends on the
-Version Control API module.
+Version Control API and Project modules.
 
 
 AUTHOR

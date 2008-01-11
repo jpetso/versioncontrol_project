@@ -2,15 +2,18 @@
 // $Id$
 /**
  * @file
- * Version Control / Project Node Integration - Integrates nodes of any content
- * type with version control systems supported by the Version Control API.
+ * Version Control / Project Node Integration - Integrates project nodes
+ * (provided by the Project module) with version control systems supported
+ * by the Version Control API.
  *
  * Copyright 2006, 2007 Derek Wright ("dww" , http://drupal.org/user/46549)
  * Copyright 2007 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
 
-include_once(drupal_get_path('module', 'versioncontrol_project') .'/versioncontrol_project.metrics.inc');
- 
+if (module_exists('metrics')) {
+  include_once(drupal_get_path('module', 'versioncontrol_project') .'/versioncontrol_project.metrics.inc');
+}
+
 /**
  * Implementation of hook_enable().
  */
@@ -364,8 +367,9 @@ function versioncontrol_project_form_validate($form_id, $form_values) {
     return;
   }
 
-  // project.module specific. Not the most ideal place for these checks,
-  // but what the hell, it doesn't hurt nobody.
+  // This one is especially project.module specific. Please leave the
+  // module test, I still hope that we might go back to supporting any kind
+  // of content type sometime again.
   if (module_exists('project')) {
     if (project_use_taxonomy() && isset($form_values['project_type'])
         && variable_get('versioncontrol_project_dir_validate_by_type', 1)) {
