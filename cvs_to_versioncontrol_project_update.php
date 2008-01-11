@@ -379,6 +379,10 @@ function update_info_page() {
   $output .= "<li>Make sure the Version Control/Project Node integration module is <a href=\"index.php?q=admin/build/modules\">properly installed</a>.</li>\n";
   $output .= "<li>Make sure this file is placed in the root of your Drupal installation (the same directory that index.php is in) and <a href=\"cvs_to_versioncontrol_project_update.php?op=selection\">run the database upgrade script</a>. Don't upgrade your database twice as it may cause problems.</li>\n";
   $output .= "</ol>";
+  $output .= "<h2>Caveats</h2>\n";
+  $output .= "<ul>\n";
+  $output .= "<li>If a repository entry in the old CVS module lists more than one module in the 'Modules' field (at admin/project/cvs-repositories/edit/[repo_id]), the script will not correctly generate the new project paths to the repository directories (listed on project nodes, edit page, 'Version control integration' fieldset, 'Project directory').</li>\n";
+  $output .= "</ul>\n";
   return $output;
 }
 
