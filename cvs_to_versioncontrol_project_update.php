@@ -224,7 +224,7 @@ function update_progress_page_nojs() {
   }
   else {
     // Abort the update if the necessary modules aren't installed.
-    if (!module_exists('versioncontrol') || !module_exists('versioncontrol_project')) {
+    if (!module_exists('versioncontrol') || !module_exists('versioncontrol_project') || !module_exists('cvs')) {
       print update_finished_page(FALSE);
       return NULL;
     }
@@ -255,7 +255,7 @@ function update_finished_page($success) {
   }
   else {
     $output = '<p class="error">The update process was aborted prematurely. All other errors have been <a href="index.php?q=admin/logs/watchdog">logged</a>. You may need to check the <code>watchdog</code> database table manually.</p>';
-    $output .= '<p class="error">This has most likely occurred because the Version Control/Project Node integration module is not <a href=\"index.php?q=admin/build/modules\">properly installed</a>.</p>';
+    $output .= '<p class="error">This has most likely occurred because the Version Control/Project Node integration module or the CVS module is not <a href=\"index.php?q=admin/build/modules\">properly installed</a>.</p>';
   }
 
   $output .= theme('item_list', $links);
