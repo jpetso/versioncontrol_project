@@ -132,7 +132,8 @@ function update_selection_page() {
   $output .= '<p>Click Update to start the update process.</p>';
 
   drupal_set_title('CVS module to Version Control/Project Node integration module update');
-
+  // Use custom update.js.
+  drupal_add_js(update_js(), 'inline');
   $output .= drupal_get_form('update_script_selection_form');
 
   return $output;
@@ -141,6 +142,11 @@ function update_selection_page() {
 function update_script_selection_form() {
   $form = array();
 
+  $form['has_js'] = array(
+    '#type' => 'hidden',
+    '#default_value' => FALSE,
+    '#attributes' => array('id' => 'edit-has_js'),
+  );
   $form['submit'] = array(
     '#type' => 'submit',
     '#value' => 'Update',
@@ -158,7 +164,63 @@ function update_update_page() {
     $_SESSION['update_total'] = count($_SESSION['update_remaining']);
   }
 
-  return update_progress_page_nojs();
+  if ($_POST['has_js']) {
+    return update_progress_page();
+  }
+  else {
+    return update_progress_page_nojs();
+  }
+}
+
+function update_progress_page() {
+  // Prevent browser from using cached drupal.js or update.js
+  drupal_add_js('misc/progress.js', 'core', 'header', FALSE, TRUE);
+  drupal_add_js(update_js(), 'inline');
+
+  drupal_set_title('Updating');
+  $output = '<div id="progress"></div>';
+  $output .= '<p id="wait">Please wait while your site is being updated.</p>';
+  return $output;
+}
+
+/**
+ * Can't include misc/update.js, because it makes a direct call to update.php.
+ *
+ * @return unknown
+ */
+function update_js() {
+  return "
+  if (Drupal.jsEnabled) {
+    $(document).ready(function() {
+      $('#edit-has-js').each(function() { this.value = 1; });
+      $('#progress').each(function () {
+        var holder = this;
+
+        // Success: redirect to the summary.
+        var updateCallback = function (progress, status, pb) {
+          if (progress == 100) {
+            pb.stopMonitoring();
+            window.location = window.location.href.split('op=')[0] +'op=finished';
+          }
+        }
+
+        // Failure: point out error message and provide link to the summary.
+        var errorCallback = function (pb) {
+          var div = document.createElement('p');
+          div.className = 'error';
+          $(div).html('An unrecoverable error has occured. You can find the error message below. It is advised to copy it to the clipboard for reference. Please continue to the <a href=\"cvs_to_versioncontrol_project_update.php?op=error\">update summary</a>');
+          $(holder).prepend(div);
+          $('#wait').hide();
+        }
+
+        var progress = new Drupal.progressBar('updateprogress', updateCallback, \"POST\", errorCallback);
+        progress.setProgress(-1, 'Starting updates');
+        $(holder).append(progress.element);
+        progress.startMonitoring('cvs_to_versioncontrol_project_update.php?op=do_update', 0);
+      });
+    });
+  }
+  ";
 }
 
 /**
@@ -198,6 +260,25 @@ function update_do_updates() {
   }
 
   return array($percentage, isset($update['module']) ? 'Updating '. $update['module'] .' module' : 'Updating complete');
+}
+
+/**
+ * Perform updates for the JS version and return progress.
+ */
+function update_do_update_page() {
+  global $conf;
+
+  // HTTP Post required
+  if ($_SERVER['REQUEST_METHOD'] != 'POST') {
+    drupal_set_message('HTTP Post is required.', 'error');
+    drupal_set_title('Error');
+    return '';
+  }
+
+  // Error handling: if PHP dies, the output will fail to parse as JSON, and
+  // the Javascript will tell the user to continue to the op=error page.
+  list($percentage, $message) = update_do_updates();
+  print drupal_to_js(array('status' => TRUE, 'percentage' => $percentage, 'message' => $message));
 }
 
 /**
@@ -334,6 +415,10 @@ if (($access_check == FALSE) || ($user->uid == 1)) {
       break;
 
     case 'do_update':
+      $output = update_do_update_page();
+      break;
+
+    case 'do_update_nojs':
       $output = update_progress_page_nojs();
       break;
 
