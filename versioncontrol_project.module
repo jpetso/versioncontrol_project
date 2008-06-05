@@ -7,7 +7,7 @@
  * by the Version Control API.
  *
  * Copyright 2006, 2007 Derek Wright ("dww" , http://drupal.org/user/46549)
- * Copyright 2007 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
+ * Copyright 2007, 2008 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
 
 if (module_exists('metrics')) {
@@ -661,7 +661,7 @@ function versioncontrol_project_commitlog($node) {
   }
 
   $_REQUEST['nids'] = (string) $node->nid;
-  return commitlog_commits_page();
+  return commitlog_operations_page();
 }
 
 /**
@@ -1271,24 +1271,8 @@ function versioncontrol_project_creation_is_allowed($uid) {
 
 
 /**
- * Implementation of hook_versioncontrol_commit_access():
- * Project based commit restrictions.
- *
- * @param $commit
- *   A commit array of the commit that is about to happen. As it's not
- *   committed yet, it's not yet in the database as well, which means that
- *   any commit info retrieval functions won't work on this commit array.
- *   It also means there's no 'vc_op_id', 'revision' and 'date' elements like
- *   in regular commit arrays. The 'message' element might or might not be set.
- * @param $commit_actions
- *   The commit actions of the above commit that is about to happen.
- *   Further information retrieval functions won't work on this array as well.
- *   Also, the 'source items' element of each action and the 'revision' element
- *   of each item in these actions might not be set.
- * @param $branch
- *   The target branch where the commit will happen (a string like 'DRUPAL-5').
- *   If the respective backend doesn't support branches,
- *   this may be NULL instead.
+ * Implementation of hook_versioncontrol_write_access():
+ * Project based commit/branch/tag restrictions.
  *
  * @return
  *   An array with error messages (without trailing newlines) if the commit
@@ -1296,218 +1280,53 @@ function versioncontrol_project_creation_is_allowed($uid) {
  *   or TRUE if the commit should be allowed no matter what other
  *   commit access callbacks say.
  */
-function versioncontrol_project_versioncontrol_commit_access($commit, $commit_actions, $branch = NULL) {
-  if (empty($commit_actions)) {
+function versioncontrol_project_versioncontrol_write_access($operation, $operation_items) {
+  if (empty($operation_items)) {
     return array(); // no idea if this is ever going to happen, but let's be prepared
   }
   if (!variable_get('versioncontrol_project_restrict_commits', 1)) {
     return array(); // we don't need no restrictions
   }
 
-  $error_messages = _versioncontrol_project_check_drupal_user($commit, $user);
-  if (!empty($error_messages)) {
-    return $error_messages;
-  }
-
-  foreach ($commit_actions as $path => $action) {
-    $item = versioncontrol_get_affected_item($action);
-    $error_messages = _versioncontrol_project_check_item_access(
-      $commit['repository'], $item, $user, $commit['directory'], TRUE
-    );
-    if (!empty($error_messages)) {
-      return $error_messages;
-    }
-  }
-  return array();
-}
-
-/**
- * Implementation of hook_versioncontrol_branch_access():
- * Determine if the given branch may be assigned to a set of items.
- *
- * @param $branch
- *   A structured array that consists of the following elements:
- *
- *   - 'branch_name': The name of the target branch
- *        (a string like 'DRUPAL-6--1').
- *   - 'action': Specifies what is going to happen with the branch. This is
- *        VERSIONCONTROL_ACTION_ADDED if the branch is being created,
- *        VERSIONCONTROL_ACTION_MOVED if it's being renamed,
- *        or VERSIONCONTROL_ACTION_DELETED if it is slated for deletion.
- *   - 'uid': The Drupal user id of the committer, or 0 if no Drupal user
- *        could be associated to the committer.
- *   - 'username': The system specific VCS username of the committer.
- *   - 'repository': The repository where the branching occurs,
- *        given as a structured array, like the return value
- *        of versioncontrol_get_repository().
- *   - 'directory': The deepest-level directory in the repository that is
- *        common to all of the branched items.
- *
- * @param $branched_items
- *   An array of all items that are affected by the branching operation.
- *   Compared to standard item arrays, the ones in here may not have the
- *   'revision' element set and can optionally contain a 'source branch'
- *   element that specifies the original branch name of this item.
- *   (For $op == 'delete', 'source branch' is never set.)
- *   An empty $branched_items array means that the whole repository has been
- *   branched.
- *
- * @return
- *   An array with error messages (without trailing newlines) if the branch
- *   may not be assigned, or an empty array if we're indifferent,
- *   or TRUE if the branch may be assigned no matter what other
- *   branch access callbacks say.
- */
-function versioncontrol_project_versioncontrol_branch_access($branch, $branched_items) {
-  return _versioncontrol_project_branch_or_tag_access($branch, $branched_items);
-}
-
-/**
- * Implementation of hook_versioncontrol_tag_access():
- * Determine if the given tag may be assigned to a set of items.
- *
- * @param $tag
- *   A structured array that consists of the following elements:
- *
- *   - 'tag_name': The name of the tag (a string like 'DRUPAL-6--1-1').
- *   - 'action': Specifies what is going to happen with the tag. This is
- *        VERSIONCONTROL_ACTION_ADDED if the tag is being created,
- *        VERSIONCONTROL_ACTION_MOVED if it's being renamed,
- *        or VERSIONCONTROL_ACTION_DELETED if it is slated for deletion.
- *   - 'uid': The Drupal user id of the committer, or 0 if no Drupal user
- *        could be associated to the committer.
- *   - 'username': The system specific VCS username of the committer.
- *   - 'repository': The repository where the tagging occurs,
- *        given as a structured array, like the return value
- *        of versioncontrol_get_repository().
- *   - 'directory': The deepest-level directory in the repository that is
- *        common to all of the tagged items.
- *   - 'message': The tag message that the user has given. If the version
- *        control system doesn't support tag messages, this is an empty string.
- *
- * @param $tagged_items
- *   An array of all items that are affected by the tagging operation.
- *   Compared to standard item arrays, the ones in here may not have the
- *   'revision' element set and can optionally contain a 'source branch'
- *   element that specifies the original branch name of this item.
- *   (For $op == 'move' or $op == 'delete', 'source branch' is never set.)
- *   An empty $tagged_items array means that the whole repository has been
- *   tagged.
- *
- * @return
- *   An array with error messages (without trailing newlines) if the tag
- *   may not be assigned, or an empty array if we're indifferent,
- *   or TRUE if the tag may be assigned no matter what other
- *   tag access callbacks say.
- */
-function versioncontrol_project_versioncontrol_tag_access($tag, $tagged_items) {
-  return _versioncontrol_project_branch_or_tag_access($tag, $tagged_items);
-}
-
-/**
- * Shared code between branch_access() and tag_access():
- * Disallow assigning tags or branches in directories that don't have
- * a project assigned.
- */
-function _versioncontrol_project_branch_or_tag_access($branch_or_tag, $items) {
-  if (!variable_get('versioncontrol_project_restrict_commits', 1)) {
-    return array(); // we don't need no restrictions
-  }
-
-  $error_messages = _versioncontrol_project_check_drupal_user($branch_or_tag, $user);
-  if (!empty($error_messages)) {
-    return $error_messages;
-  }
-
-  // For version control systems where branching and tagging is done
-  // per-directory (that is, where !empty($items)), check if the given items
-  // are maintained by the user.
-  foreach ($items as $item) {
-    $error_messages = _versioncontrol_project_check_item_access(
-      $branch_or_tag['repository'], $item, $user, $branch_or_tag['directory'], FALSE
-    );
-    if (!empty($error_messages)) {
-      return $error_messages;
-    }
-  }
-  // No objections, the user may execute the branch or tag operation.
-  return array();
-}
-
-/**
- * Determine if the user for the given Drupal user id exists, and return
- * an appropriate error message array.
- *
- * @param $object
- *   The commit or branch/tag operation array that should be checked.
- * @param $user
- *   A by-reference parameter that will be filled with the return value
- *   of user_load(). That is, if this function returns an empty array
- *   (no errors) then this is the user object of the committer.
- *
- * @return
- *   An empty array if the user exists, or an array filled
- *   with an error message if the user doesn't exist.
- */
-function _versioncontrol_project_check_drupal_user($object, &$user) {
-  if ($object['uid'] != 0) {
-    $user = user_load(array('uid' => $object['uid']));
+  // Check if there is a Drupal user at all for this committer.
+  // Naturally, only users with an account and project node can be maintainers.
+  if ($operation['uid'] != 0) {
+    $user = user_load(array('uid' => $operation['uid']));
   }
   if (!$user) {
-    $backends = versioncontrol_get_backends();
-    $backend = $backends[$object['repository']['vcs']];
+    $backends = versioncontrol_get_backend($operation['repository']);
 
     $error_message = t(
 "** ERROR: no Drupal user matches !vcs user '!user'.
 ** Please contact a !vcs administrator for help.",
-      array('!vcs' => $backend['name'], '!user' => $object['username'])
+      array('!vcs' => $backend['name'], '!user' => $operation['username'])
     );
     return array($error_message);
   }
-  return array();
-}
+  $error_messages = array();
 
-/**
- * Determine if an item is part of one of the projects that are maintained
- * by the given user, and return an appropriate error message array.
- *
- * @param $repository
- *   The repository where the item is located.
- * @param $item
- *   The item that should be checked on access rights.
- * @param $user
- *   The author who tries to commit/branch/tag this item.
- * @param $directory_label
- *   The directory that is being shown in the error message.
- * @param $default_item_access
- *   Determines if items may be accessed if they don't belong to any project.
- *   TRUE if unassociated items may be accessed, or FALSE if not.
- *
- * @return
- *   An empty array if the item is inside one of the user's projects,
- *   or an array filled with an error message if it isn't.
- */
-function _versioncontrol_project_check_item_access($repository, $item, $user, $directory_label, $default_item_access) {
-  $is_allowed = $default_item_access;
-  $project = versioncontrol_project_get_project_for_item($repository, $item['path']);
+  // It's allowed to commit to places without a project, but it's not allowed
+  // to create tags and branches there.
+  $default_item_access = ($operation['type'] == VERSIONCONTROL_OPERATION_COMMIT);
 
-  $is_allowed = isset($project)
-                ? in_array($user->uid, $project['maintainer_uids'])
-                : $default_item_access;
+  // For each item, check if the user has maintainer privileges.
+  foreach ($operation_items as $path => $item) {
+    $project = versioncontrol_project_get_project_for_item($repository, $item['path']);
 
-  if (!$is_allowed) {
-    // All projects have been checked and continue has not yet been hit,
-    // which means the item is outside the user's projects.
-    $error_message = t(
-'** Access denied: !user does not have permission to operate on files in:
-** !directory',
-      array('!user' => $user->name, '!directory' => $directory_label)
-    ) .
-    _versioncontrol_project_get_project_error_appendix($project);
+    $is_allowed = isset($project)
+                  ? in_array($user->uid, $project['maintainer_uids'])
+                  : $default_item_access;
 
-    return array($error_message);
+    if (!$is_allowed) {
+      // All projects have been checked and continue has not yet been hit,
+      // which means the item is outside the user's projects.
+      $error_messages[] = t(
+'** Access denied: !user does not have maintainer privileges for:
+** !path', array('!user' => $user->name, '!path' => $path)
+      ) . _versioncontrol_project_get_project_error_appendix($project);
+    }
   }
-  return array();
+  return $error_messages;
 }
 
 function _versioncontrol_project_get_project_error_appendix($project = NULL) {
