@@ -763,6 +763,8 @@ function versioncontrol_project_block($op = 'list', $delta = 0) {
  *        will only contain commits that correspond to one of the projects
  *        that any of the specified users maintain.
  */
+// TODO: rename to operation_constraints, or better, alter the get_operations()
+//       query without requiring this function to be called at all.
 function versioncontrol_project_get_commit_constraints($constraints, $project_constraints) {
   if (isset($project_constraints['maintainer_uids'])) {
     $paths = array();
