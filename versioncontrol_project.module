@@ -1021,8 +1021,8 @@ function _versioncontrol_project_get_comaintainers($nid) {
  *
  * @param $repository
  *   The repository which contains the item.
- * @param $item_path
- *   The path of the item.
+ * @param $item
+ *   The path of the item, or a whole item array.
  * @param $include_unpublished
  *   If FALSE (which is the default), this function returns NULL
  *   when the project node is unpublished, even if the project exists.
@@ -1042,12 +1042,20 @@ function _versioncontrol_project_get_comaintainers($nid) {
  *
  *   If the item doesn't belong to any project, NULL is returned.
  */
-function versioncontrol_project_get_project_for_item($repository, $item_path, $include_unpublished = FALSE) {
+function versioncontrol_project_get_project_for_item($repository, $item, $include_unpublished = FALSE) {
   static $projects_for_item = array();
   $repo_id = $repository['repo_id'];
 
   if (!isset($projects_for_item[$repo_id])) {
     $projects_for_item[$repo_id] = array();
+  }
+
+  if (is_string($item)) {
+    $item_path = $item;
+  }
+  else {
+    $item_path = versioncontrol_is_file_item($item)
+                  ? dirname($item['path']) : $item['path'];
   }
 
   $current_path = $item_path;
@@ -1128,7 +1136,7 @@ function versioncontrol_project_get_projects_for_operation($operation, $include_
 
   foreach ($operation_items as $path => $item) {
     $project = versioncontrol_project_get_project_for_item(
-      $operation['repository'], $path, $include_unpublished
+      $operation['repository'], $item, $include_unpublished
     );
     if (isset($project)) {
       $projects[$project['nid']] = $project;
@@ -1302,7 +1310,7 @@ function versioncontrol_project_versioncontrol_write_access($operation, $operati
 
   // For each item, check if the user has maintainer privileges.
   foreach ($operation_items as $path => $item) {
-    $project = versioncontrol_project_get_project_for_item($repository, $item['path']);
+    $project = versioncontrol_project_get_project_for_item($repository, $item);
 
     $is_allowed = isset($project)
                   ? in_array($user->uid, $project['maintainer_uids'])
