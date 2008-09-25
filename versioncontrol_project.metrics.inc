@@ -59,10 +59,10 @@ function versioncontrol_project_lines_changed($op, $options = NULL, $node = NULL
       $constraints = versioncontrol_project_get_commit_constraints(
         $constraints, array('nids' => array($node->nid))
       );
-      $commits = versioncontrol_get_commits($constraints);
+      $commit_operations = versioncontrol_get_commit_operations($constraints);
       $count = 0;
-      foreach ($commits as $key => $commit) {
-        $statistics = versioncontrol_get_commit_statistics($commit);
+      foreach ($commit_operations as $key => $commit_operation) {
+        $statistics = versioncontrol_get_commit_statistics($commit_operation);
         $count += $statistics['lines_added'];
         $count += $statistics['lines_removed'];
       }

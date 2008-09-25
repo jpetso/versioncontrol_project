@@ -751,7 +751,7 @@ function versioncontrol_project_block($op = 'list', $delta = 0) {
  *
  * @param $constraints
  *   The constraints array that you already prepared for passing to
- *   versioncontrol_get_commits().
+ *   versioncontrol_get_operations().
  *
  * @param $project_constraints
  *   An array of project specific constraints.
@@ -763,9 +763,9 @@ function versioncontrol_project_block($op = 'list', $delta = 0) {
  *        will only contain commits that correspond to one of the projects
  *        that any of the specified users maintain.
  */
-// TODO: rename to operation_constraints, or better, alter the get_operations()
-//       query without requiring this function to be called at all.
-function versioncontrol_project_get_commit_constraints($constraints, $project_constraints) {
+// TODO: alter the versioncontrol_get_operations() query without requiring
+//       this function to be called at all.
+function versioncontrol_project_get_operation_constraints($constraints, $project_constraints) {
   if (isset($project_constraints['maintainer_uids'])) {
     $paths = array();
     $projects = versioncontrol_project_get_projects(array(
@@ -1360,8 +1360,8 @@ function versioncontrol_project_versioncontrol_account($op, $uid, $username, $re
  * Retrieve statistics about projects from a set of commits.
  *
  * @param $constraints
- *   The constraints (as passed to versioncontrol_get_commits()) that define
- *   which commits are taken into consideration for the statistics.
+ *   The constraints (as passed to versioncontrol_get_commit_operations()) that
+ *   define which commits are taken into consideration for the statistics.
  * @param $limit
  *   If given, only the n most active projects (in terms of commits)
  *   will be included in the result.
@@ -1390,7 +1390,7 @@ function versioncontrol_project_get_statistics($constraints, $limit = NULL) {
   $first_commits = array();
   $last_commits = array();
 
-  $commit_operations = versioncontrol_get_commits($constraints);
+  $commit_operations = versioncontrol_get_commit_operations($constraints);
 
   // Find out which projects are affected, and how active they have been.
   foreach ($commit_operations as $commit_op) {
