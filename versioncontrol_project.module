@@ -676,7 +676,7 @@ function versioncontrol_project_developers($node) {
   }
 
   $project = $node->versioncontrol_project;
-  $constraints = versioncontrol_project_get_commit_constraints(
+  $constraints = versioncontrol_project_get_operation_constraints(
     array(), array('nids' => array($project['nid']))
   );
   return theme('versioncontrol_user_statistics', $constraints);
