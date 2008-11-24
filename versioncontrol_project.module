@@ -1310,7 +1310,7 @@ function versioncontrol_project_versioncontrol_write_access($operation, $operati
 
   // For each item, check if the user has maintainer privileges.
   foreach ($operation_items as $path => $item) {
-    $project = versioncontrol_project_get_project_for_item($repository, $item);
+    $project = versioncontrol_project_get_project_for_item($operation['repository'], $item);
 
     $is_allowed = isset($project)
                   ? in_array($user->uid, $project['maintainer_uids'])
