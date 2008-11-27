@@ -604,8 +604,7 @@ function versioncontrol_project_commit_access_delete_confirm($node, $uid) {
     drupal_set_title(t('User is locked'));
     $form['nodelete'] = array(
       '#type' => 'markup',
-      '#value' => t('You cannot delete commit access for !user because this user is the owner of the project.',
-                    array('!user' => theme('username', $node))),
+      '#value' => t('You cannot revoke commit access for !user because this user is the owner of the project.', array('!user' => theme('username', $node))),
     );
     return $form;
   }
@@ -626,7 +625,7 @@ function versioncontrol_project_commit_access_delete_confirm($node, $uid) {
   $form['uid'] = array('#type' => 'value', '#value' => $uid);
 
   return confirm_form($form,
-    t('Are you sure you want to delete commit access for !user?',
+    t('Are you sure you want to revoke commit access for !user?',
       array('!user' => theme('username', $user))),
     'node/'. $node->nid .'/commit-access',
     t('This action cannot be undone.'),
@@ -644,7 +643,7 @@ function versioncontrol_project_commit_access_delete_confirm_submit($form_id, $f
   $user = user_load(array('uid' => $uid));
   db_query('DELETE FROM {versioncontrol_project_comaintainers}
             WHERE nid = %d AND uid = %d', $nid, $uid);
-  drupal_set_message(t('Commit access for !user has been deleted.', array('!user' => theme('username', $user))));
+  drupal_set_message(t('Commit access for !user has been revoked.', array('!user' => theme('username', $user))));
   return 'node/'. $nid .'/commit-access';
 }
 
@@ -660,7 +659,7 @@ function versioncontrol_project_commitlog($node) {
     project_project_set_breadcrumb($node, array(l($title, 'node/'. $node->nid)));
   }
 
-  $_REQUEST['nids'] = (string) $node->nid;
+  $_REQUEST['nids'] = (string) $node->nid; // hack, should be able to pass operation constraints instead
   return commitlog_operations_page();
 }
 
@@ -758,9 +757,9 @@ function versioncontrol_project_block($op = 'list', $delta = 0) {
  *   Possible array elements handled by this module are:
  *
  *   - 'nids': An array of project node ids.
- *        If given, only commits for these projects will be returned.
+ *        If given, only operations for these projects will be returned.
  *   - 'maintainer_uids': An array of Drupal user ids. If given, the result set
- *        will only contain commits that correspond to one of the projects
+ *        will only contain operations that correspond to one of the projects
  *        that any of the specified users maintain.
  */
 // TODO: alter the versioncontrol_get_operations() query without requiring
@@ -1071,6 +1070,12 @@ function versioncontrol_project_get_project_for_item($repository, $item, $includ
       $project_for_item = $projects_for_item[$repo_id][$current_path];
     }
     else {
+      // TODO: Possible optimization:
+      // Gather all possible project directories beforehand - storing them
+      // in an array - and query them all at once ("OR" for directory paths).
+      // The directory with the longest string length is the one that applies.
+      // (Make sure to use the cache still, otherwise that might backfire.)
+
       $result = db_query("SELECT p.nid, n.uid, p.repo_id, p.directory
                           FROM {versioncontrol_project_projects} p
                            INNER JOIN {node} n ON p.nid = n.nid
@@ -1147,8 +1152,8 @@ function versioncontrol_project_get_projects_for_operation($operation, $include_
 
 
 /**
- * Add or update a project. This operation will fail if the given project's nid
- * doesn't correspond to an existing node.
+ * Add or update a project. This will fail if the given project's nid doesn't
+ * correspond to an existing node.
  *
  * @param $project
  *   The project array containing the new or existing repository.
@@ -1306,7 +1311,13 @@ function versioncontrol_project_versioncontrol_write_access($operation, $operati
 
   // It's allowed to commit to places without a project, but it's not allowed
   // to create tags and branches there.
-  $default_item_access = ($operation['type'] == VERSIONCONTROL_OPERATION_COMMIT);
+  $default_item_access = TRUE;
+  foreach ($operation['labels'] as $label) {
+    if ($label['action'] == VERSIONCONTROL_ACTION_ADDED) {
+      $default_item_access = FALSE;
+      break;
+    }
+  }
 
   // For each item, check if the user has maintainer privileges.
   foreach ($operation_items as $path => $item) {
