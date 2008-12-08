@@ -652,15 +652,12 @@ function versioncontrol_project_commit_access_delete_confirm_submit($form_id, $f
  * Callback for "node/$nid/commitlog".
  */
 function versioncontrol_project_commitlog($node) {
-  $title = check_plain($node->title);
-  drupal_set_title(t('Commits for !title', array('!title' => $title)));
+  drupal_set_title(t('Commits for @title', array('@title' => $node->title)));
 
   if ($node->type == 'project_project') {
     project_project_set_breadcrumb($node, array(l($title, 'node/'. $node->nid)));
   }
-
-  $_REQUEST['nids'] = (string) $node->nid; // hack, should be able to pass operation constraints instead
-  return commitlog_operations_page();
+  return commitlog_operations(array('nids' => array($node->nid)));
 }
 
 /**
@@ -675,9 +672,7 @@ function versioncontrol_project_developers($node) {
   }
 
   $project = $node->versioncontrol_project;
-  $constraints = versioncontrol_project_get_operation_constraints(
-    array(), array('nids' => array($project['nid']))
-  );
+  $constraints = array('nids' => array($project['nid']));
   return theme('versioncontrol_user_statistics', $constraints);
 }
 
@@ -759,17 +754,26 @@ function versioncontrol_project_block($op = 'list', $delta = 0) {
 }
 
 /**
- * Return a modified version of the given commit constraints that includes
+ * Implementation of hook_commitlog_constraints():
+ * Provide a list of supported constraints and corresponding request attributes.
+ */
+function versioncontrol_project_commitlog_constraints() {
+  return array(
+    'maintainer_uids' => array('single' => 'maintainer', 'multiple' => 'maintainers'),
+    'nids'            => array('single' => 'nid',        'multiple' => 'nids'),
+  );
+}
+
+/**
+ * Implementation of versioncontrol_alter_operation_constraints():
+ * Return a modified version of the given operation constraints that includes
  * the given project specific constraints in a way that the Version Control API
  * can understand it.
  *
  * @param $constraints
- *   The constraints array that you already prepared for passing to
- *   versioncontrol_get_operations().
- *
- * @param $project_constraints
- *   An array of project specific constraints.
- *   Possible array elements handled by this module are:
+ *   The constraints array that were passed to versioncontrol_get_operations().
+ *   The following constraints will be removed and replaced by constraints that
+ *   the Version Control API can process natively:
  *
  *   - 'nids': An array of project node ids.
  *        If given, only operations for these projects will be returned.
@@ -777,17 +781,20 @@ function versioncontrol_project_block($op = 'list', $delta = 0) {
  *        will only contain operations that correspond to one of the projects
  *        that any of the specified users maintain.
  */
-// TODO: alter the versioncontrol_get_operations() query without requiring
-//       this function to be called at all.
-function versioncontrol_project_get_operation_constraints($constraints, $project_constraints) {
-  if (isset($project_constraints['maintainer_uids'])) {
-    $paths = array();
+// TODO: alter the versioncontrol_get_operations() SQL query instead of just
+//       altering the constraints array.
+function versioncontrol_project_alter_operation_constraints(&$constraints) {
+  if (isset($constraints['maintainer_uids'])) {
     $projects = versioncontrol_project_get_projects(array(
-      'maintainer_uids' => $project_constraints['maintainer_uids'],
+      'maintainer_uids' => $constraints['maintainer_uids'],
     ), TRUE);
 
+    $paths = array();
+    $repo_ids = array();
+
     foreach ($projects as $nid => $project) {
-      $paths[] = $project->directory;
+      $paths[] = $project['directory'];
+      $repo_ids[] = $project['repo_id'];
     }
 
     // In case the caller has also passed a 'paths' constraint, intersect this
@@ -796,16 +803,23 @@ function versioncontrol_project_get_operation_constraints($constraints, $project
     $constraints['paths'] = isset($constraints['paths'])
                             ? array_intersect($paths, $constraints['paths'])
                             : $paths;
+    $constraints['repo_ids'] = isset($constraints['repo_ids'])
+                                ? array_intersect($repo_ids, $constraints['repo_ids'])
+                                : $repo_ids;
+    unset($constraints['maintainer_uids']);
   }
 
-  if (isset($project_constraints['nids'])) {
-    $paths = array();
+  if (isset($constraints['nids'])) {
     $projects = versioncontrol_project_get_projects(array(
-      'nids' => $project_constraints['nids'],
+      'nids' => $constraints['nids'],
     ), TRUE);
+
+    $paths = array();
+    $repo_ids = array();
 
     foreach ($projects as $nid => $project) {
       $paths[] = $project['directory'];
+      $repo_ids[] = $project['repo_id'];
     }
 
     // In case the caller has also passed a 'paths' constraint, intersect this
@@ -814,9 +828,11 @@ function versioncontrol_project_get_operation_constraints($constraints, $project
     $constraints['paths'] = isset($constraints['paths'])
                             ? array_intersect($paths, $constraints['paths'])
                             : $paths;
+    $constraints['repo_ids'] = isset($constraints['repo_ids'])
+                                ? array_intersect($repo_ids, $constraints['repo_ids'])
+                                : $repo_ids;
+    unset($constraints['nids']);
   }
-
-  return $constraints;
 }
 
 
