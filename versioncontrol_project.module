@@ -118,6 +118,14 @@ function versioncontrol_project_menu($may_cache) {
   return $items;
 }
 
+/**
+ * Implementation of project.module's hook_project_page_link_alter():
+ * Add a link to the project's commit log to the resources section.
+ */
+function versioncontrol_project_project_page_link_alter($node, &$all_links) {
+  $all_links['development']['links']['view_commitlog'] = l(t('View commit messages'), 'node/'. $node->nid .'/commitlog');
+}
+
 
 /**
  * Form callback for 'admin/project/versioncontrol-project':
