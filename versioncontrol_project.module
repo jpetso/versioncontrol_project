@@ -123,7 +123,9 @@ function versioncontrol_project_menu($may_cache) {
  * Add a link to the project's commit log to the resources section.
  */
 function versioncontrol_project_project_page_link_alter($node, &$all_links) {
-  $all_links['development']['links']['view_commitlog'] = l(t('View commit messages'), 'node/'. $node->nid .'/commitlog');
+  if (isset($node->versioncontrol_project) && $node->versioncontrol_project['repo_id'] > 0) {
+    $all_links['development']['links']['view_commitlog'] = l(t('View commit messages'), 'node/'. $node->nid .'/commitlog');
+  }
 }
 
 
