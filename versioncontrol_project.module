@@ -118,6 +118,16 @@ function versioncontrol_project_menu($may_cache) {
   return $items;
 }
 
+/**
+ * Implementation of project.module's hook_project_page_link_alter():
+ * Add a link to the project's commit log to the resources section.
+ */
+function versioncontrol_project_project_page_link_alter($node, &$all_links) {
+  if (isset($node->versioncontrol_project) && $node->versioncontrol_project['repo_id'] > 0) {
+    $all_links['development']['links']['view_commitlog'] = l(t('View commit messages'), 'node/'. $node->nid .'/commitlog');
+  }
+}
+
 
 /**
  * Form callback for 'admin/project/versioncontrol-project':
@@ -338,7 +348,7 @@ function versioncontrol_project_form_validate($form_id, $form_values) {
   }
 
   if (!$repo_id) {
-    // no version control integration, we don't have to validate
+    // No version control integration, we don't have to validate.
     return;
   }
 
@@ -565,8 +575,8 @@ function versioncontrol_project_commit_access_form_validate($form_id, $form_valu
     return;
   }
 
-  // save the uid in the form so we don't have to look it up again in
-  // submit(). we also stash user, since it's not set directly when
+  // Save the uid in the form so we don't have to look it up again in
+  // submit(). We also stash user, since it's not set directly when
   // using the special theme function to generate the form.
   form_set_value($form['uid'], $uid);
 }
@@ -604,8 +614,7 @@ function versioncontrol_project_commit_access_delete_confirm($node, $uid) {
     drupal_set_title(t('User is locked'));
     $form['nodelete'] = array(
       '#type' => 'markup',
-      '#value' => t('You cannot delete commit access for !user because this user is the owner of the project.',
-                    array('!user' => theme('username', $node))),
+      '#value' => t('You cannot revoke commit access for !user because this user is the owner of the project.', array('!user' => theme('username', $node))),
     );
     return $form;
   }
@@ -626,7 +635,7 @@ function versioncontrol_project_commit_access_delete_confirm($node, $uid) {
   $form['uid'] = array('#type' => 'value', '#value' => $uid);
 
   return confirm_form($form,
-    t('Are you sure you want to delete commit access for !user?',
+    t('Are you sure you want to revoke commit access for !user?',
       array('!user' => theme('username', $user))),
     'node/'. $node->nid .'/commit-access',
     t('This action cannot be undone.'),
@@ -644,7 +653,7 @@ function versioncontrol_project_commit_access_delete_confirm_submit($form_id, $f
   $user = user_load(array('uid' => $uid));
   db_query('DELETE FROM {versioncontrol_project_comaintainers}
             WHERE nid = %d AND uid = %d', $nid, $uid);
-  drupal_set_message(t('Commit access for !user has been deleted.', array('!user' => theme('username', $user))));
+  drupal_set_message(t('Commit access for !user has been revoked.', array('!user' => theme('username', $user))));
   return 'node/'. $nid .'/commit-access';
 }
 
@@ -653,15 +662,12 @@ function versioncontrol_project_commit_access_delete_confirm_submit($form_id, $f
  * Callback for "node/$nid/commitlog".
  */
 function versioncontrol_project_commitlog($node) {
-  $title = check_plain($node->title);
-  drupal_set_title(t('Commits for !title', array('!title' => $title)));
+  drupal_set_title(t('Commits for @title', array('@title' => $node->title)));
 
   if ($node->type == 'project_project') {
     project_project_set_breadcrumb($node, array(l($title, 'node/'. $node->nid)));
   }
-
-  $_REQUEST['nids'] = (string) $node->nid;
-  return commitlog_operations_page();
+  return commitlog_operations(array('nids' => array($node->nid)));
 }
 
 /**
@@ -676,9 +682,7 @@ function versioncontrol_project_developers($node) {
   }
 
   $project = $node->versioncontrol_project;
-  $constraints = versioncontrol_project_get_commit_constraints(
-    array(), array('nids' => array($project['nid']))
-  );
+  $constraints = array('nids' => array($project['nid']));
   return theme('versioncontrol_user_statistics', $constraints);
 }
 
@@ -691,19 +695,34 @@ function versioncontrol_project_user($type, &$edit, &$user, $category = NULL) {
     $constraints = array('uids' => array($user->uid));
     $statistics = versioncontrol_project_get_statistics($constraints);
     $project_titles = array();
+    $total_commits = 0;
 
     foreach ($statistics as $project_stats) {
+      $total_commits += $project_stats['number_commits'];
+
       $nid = $project_stats['project']['nid'];
       $project_name = l(check_plain($project_stats['name']), 'node/'. $nid);
-      $number_commits_text = format_plural(
-        $project_stats['number_commits'], '1 commit', '@count commits'
-      );
-
+      $number_commits_text = format_plural($project_stats['number_commits'],
+                                           '1 commit', '@count commits');
       $project_titles[] = array(
         'value' => t('!project-name (!how-many-commits)', array(
           '!project-name' => $project_name,
           '!how-many-commits' => $number_commits_text,
         )),
+      );
+      /* TODO: Drupal 6 version, with a single function call.
+               (Drupal 5 doesn't yet support additional arguments.)
+      $project_titles[] = array(
+        'value' => format_plural($project_stats['number_commits'],
+          '!project-name (1 commit)', '!project-name (@count commits)',
+          array('!project-name' => $project_name)
+        ),
+      );*/
+    }
+    if ($total_commits > 0) {
+      $project_titles[] = array(
+        'value' => format_plural($total_commits,
+                                 'Total: 1 commit', 'Total: @count commits'),
       );
     }
     if (!empty($project_titles)) {
@@ -745,33 +764,47 @@ function versioncontrol_project_block($op = 'list', $delta = 0) {
 }
 
 /**
- * Return a modified version of the given commit constraints that includes
+ * Implementation of hook_commitlog_constraints():
+ * Provide a list of supported constraints and corresponding request attributes.
+ */
+function versioncontrol_project_commitlog_constraints() {
+  return array(
+    'maintainer_uids' => array('single' => 'maintainer', 'multiple' => 'maintainers'),
+    'nids'            => array('single' => 'nid',        'multiple' => 'nids'),
+  );
+}
+
+/**
+ * Implementation of versioncontrol_alter_operation_constraints():
+ * Return a modified version of the given operation constraints that includes
  * the given project specific constraints in a way that the Version Control API
  * can understand it.
  *
  * @param $constraints
- *   The constraints array that you already prepared for passing to
- *   versioncontrol_get_commits().
- *
- * @param $project_constraints
- *   An array of project specific constraints.
- *   Possible array elements handled by this module are:
+ *   The constraints array that were passed to versioncontrol_get_operations().
+ *   The following constraints will be removed and replaced by constraints that
+ *   the Version Control API can process natively:
  *
  *   - 'nids': An array of project node ids.
- *        If given, only commits for these projects will be returned.
+ *        If given, only operations for these projects will be returned.
  *   - 'maintainer_uids': An array of Drupal user ids. If given, the result set
- *        will only contain commits that correspond to one of the projects
+ *        will only contain operations that correspond to one of the projects
  *        that any of the specified users maintain.
  */
-function versioncontrol_project_get_commit_constraints($constraints, $project_constraints) {
-  if (isset($project_constraints['maintainer_uids'])) {
-    $paths = array();
+// TODO: alter the versioncontrol_get_operations() SQL query instead of just
+//       altering the constraints array.
+function versioncontrol_project_alter_operation_constraints(&$constraints) {
+  if (isset($constraints['maintainer_uids'])) {
     $projects = versioncontrol_project_get_projects(array(
-      'maintainer_uids' => $project_constraints['maintainer_uids'],
+      'maintainer_uids' => $constraints['maintainer_uids'],
     ), TRUE);
 
+    $paths = array();
+    $repo_ids = array();
+
     foreach ($projects as $nid => $project) {
-      $paths[] = $project->directory;
+      $paths[] = $project['directory'];
+      $repo_ids[] = $project['repo_id'];
     }
 
     // In case the caller has also passed a 'paths' constraint, intersect this
@@ -780,16 +813,23 @@ function versioncontrol_project_get_commit_constraints($constraints, $project_co
     $constraints['paths'] = isset($constraints['paths'])
                             ? array_intersect($paths, $constraints['paths'])
                             : $paths;
+    $constraints['repo_ids'] = isset($constraints['repo_ids'])
+                                ? array_intersect($repo_ids, $constraints['repo_ids'])
+                                : $repo_ids;
+    unset($constraints['maintainer_uids']);
   }
 
-  if (isset($project_constraints['nids'])) {
-    $paths = array();
+  if (isset($constraints['nids'])) {
     $projects = versioncontrol_project_get_projects(array(
-      'nids' => $project_constraints['nids'],
+      'nids' => $constraints['nids'],
     ), TRUE);
+
+    $paths = array();
+    $repo_ids = array();
 
     foreach ($projects as $nid => $project) {
       $paths[] = $project['directory'];
+      $repo_ids[] = $project['repo_id'];
     }
 
     // In case the caller has also passed a 'paths' constraint, intersect this
@@ -798,9 +838,11 @@ function versioncontrol_project_get_commit_constraints($constraints, $project_co
     $constraints['paths'] = isset($constraints['paths'])
                             ? array_intersect($paths, $constraints['paths'])
                             : $paths;
+    $constraints['repo_ids'] = isset($constraints['repo_ids'])
+                                ? array_intersect($repo_ids, $constraints['repo_ids'])
+                                : $repo_ids;
+    unset($constraints['nids']);
   }
-
-  return $constraints;
 }
 
 
@@ -1019,8 +1061,8 @@ function _versioncontrol_project_get_comaintainers($nid) {
  *
  * @param $repository
  *   The repository which contains the item.
- * @param $item_path
- *   The path of the item.
+ * @param $item
+ *   The path of the item, or a whole item array.
  * @param $include_unpublished
  *   If FALSE (which is the default), this function returns NULL
  *   when the project node is unpublished, even if the project exists.
@@ -1040,12 +1082,20 @@ function _versioncontrol_project_get_comaintainers($nid) {
  *
  *   If the item doesn't belong to any project, NULL is returned.
  */
-function versioncontrol_project_get_project_for_item($repository, $item_path, $include_unpublished = FALSE) {
+function versioncontrol_project_get_project_for_item($repository, $item, $include_unpublished = FALSE) {
   static $projects_for_item = array();
   $repo_id = $repository['repo_id'];
 
   if (!isset($projects_for_item[$repo_id])) {
     $projects_for_item[$repo_id] = array();
+  }
+
+  if (is_string($item)) {
+    $item_path = $item;
+  }
+  else {
+    $item_path = versioncontrol_is_file_item($item)
+                  ? dirname($item['path']) : $item['path'];
   }
 
   $current_path = $item_path;
@@ -1061,6 +1111,12 @@ function versioncontrol_project_get_project_for_item($repository, $item_path, $i
       $project_for_item = $projects_for_item[$repo_id][$current_path];
     }
     else {
+      // TODO: Possible optimization:
+      // Gather all possible project directories beforehand - storing them
+      // in an array - and query them all at once ("OR" for directory paths).
+      // The directory with the longest string length is the one that applies.
+      // (Make sure to use the cache still, otherwise that might backfire.)
+
       $result = db_query("SELECT p.nid, n.uid, p.repo_id, p.directory
                           FROM {versioncontrol_project_projects} p
                            INNER JOIN {node} n ON p.nid = n.nid
@@ -1091,12 +1147,12 @@ function versioncontrol_project_get_project_for_item($repository, $item_path, $i
     }
 
     if ($current_path == dirname($current_path)) {
-      break; // stop at the top-level directory
+      break; // Stop at the top-level directory.
     }
     $current_path = dirname($current_path);
   }
 
-  // If we didn't find it already, cache the answer as not-found
+  // If we didn't find it already, cache the answer as "not found".
   foreach ($current_paths as $path) {
     $projects_for_item[$repo_id][$path] = FALSE;
   }
@@ -1105,11 +1161,11 @@ function versioncontrol_project_get_project_for_item($repository, $item_path, $i
 
 /**
  * Retrieve the projects that are associated to the affected items
- * in the given commit. If no projects can be associated to the commit items,
- * an empty array is returned.
+ * in the given operation. If no projects can be associated to the
+ * operation items, an empty array is returned.
  *
- * @param $commit
- *   The commit for which all associated projects should be retrieved.
+ * @param $operation
+ *   The operation for which all associated projects should be retrieved.
  * @param $include_unpublished
  *   If FALSE (which is the default), this function does not return projects
  *   where the corresponding node is unpublished.
@@ -1120,24 +1176,13 @@ function versioncontrol_project_get_project_for_item($repository, $item_path, $i
  *   The project node ids are the array keys, and the complete project arrays
  *   are given in the array values.
  */
-function versioncontrol_project_get_projects_for_commit($commit, $include_unpublished = FALSE) {
-  // First, try if the directory item itself is wholly inside a project.
-  // In that case, we wouldn't need to check each item separately.
-  $commit_directory_item = versioncontrol_get_directory_item($commit);
-  $project = versioncontrol_project_get_project_for_item(
-    $commit['repository'], $commit['directory'], $include_unpublished
-  );
-  if (isset($project)) {
-    return array($project['nid'] => $project);
-  }
-
-  // The commit spans zero or multiple projects - we need to check each item.
+function versioncontrol_project_get_projects_for_operation($operation, $include_unpublished = FALSE) {
   $projects = array();
-  $commit_actions = versioncontrol_get_commit_actions($commit);
+  $operation_items = versioncontrol_get_operation_items($operation);
 
-  foreach ($commit_actions as $path => $action) {
+  foreach ($operation_items as $path => $item) {
     $project = versioncontrol_project_get_project_for_item(
-      $commit['repository'], $path, $include_unpublished
+      $operation['repository'], $item, $include_unpublished
     );
     if (isset($project)) {
       $projects[$project['nid']] = $project;
@@ -1148,8 +1193,8 @@ function versioncontrol_project_get_projects_for_commit($commit, $include_unpubl
 
 
 /**
- * Add or update a project. This operation will fail if the given project's nid
- * doesn't correspond to an existing node.
+ * Add or update a project. This will fail if the given project's nid doesn't
+ * correspond to an existing node.
  *
  * @param $project
  *   The project array containing the new or existing repository.
@@ -1307,11 +1352,17 @@ function versioncontrol_project_versioncontrol_write_access($operation, $operati
 
   // It's allowed to commit to places without a project, but it's not allowed
   // to create tags and branches there.
-  $default_item_access = ($operation['type'] == VERSIONCONTROL_OPERATION_COMMIT);
+  $default_item_access = TRUE;
+  foreach ($operation['labels'] as $label) {
+    if ($label['action'] == VERSIONCONTROL_ACTION_ADDED) {
+      $default_item_access = FALSE;
+      break;
+    }
+  }
 
   // For each item, check if the user has maintainer privileges.
   foreach ($operation_items as $path => $item) {
-    $project = versioncontrol_project_get_project_for_item($repository, $item['path']);
+    $project = versioncontrol_project_get_project_for_item($operation['repository'], $item);
 
     $is_allowed = isset($project)
                   ? in_array($user->uid, $project['maintainer_uids'])
@@ -1361,8 +1412,8 @@ function versioncontrol_project_versioncontrol_account($op, $uid, $username, $re
  * Retrieve statistics about projects from a set of commits.
  *
  * @param $constraints
- *   The constraints (as passed to versioncontrol_get_commits()) that define
- *   which commits are taken into consideration for the statistics.
+ *   The constraints (as passed to versioncontrol_get_commit_operations()) that
+ *   define which commits are taken into consideration for the statistics.
  * @param $limit
  *   If given, only the n most active projects (in terms of commits)
  *   will be included in the result.
@@ -1391,22 +1442,22 @@ function versioncontrol_project_get_statistics($constraints, $limit = NULL) {
   $first_commits = array();
   $last_commits = array();
 
-  $commits = versioncontrol_get_commits($constraints);
+  $commit_operations = versioncontrol_get_commit_operations($constraints);
 
   // Find out which projects are affected, and how active they have been.
-  foreach ($commits as $commit) {
-    $commit_projects = versioncontrol_project_get_projects_for_commit($commit);
-    foreach ($commit_projects as $nid => $project) {
+  foreach ($commit_operations as $commit_op) {
+    $op_projects = versioncontrol_project_get_projects_for_operation($commit_op);
+    foreach ($op_projects as $nid => $project) {
       $projects[$nid] = $project;
       $project_nids[] = $nid;
 
       // Write the first commit for each iteration, the last one encountered is
-      // the first one in time. ($commits is sorted reverse chronologically.)
-      $first_commits[$nid] = $commit;
+      // the first one in time. ($commit_ops is sorted reverse chronologically.)
+      $first_commits[$nid] = $commit_op;
 
       // Similar for the last commit which is the first one that we get to see.
       if (!isset($last_commits[$nid])) {
-        $last_commits[$nid] = $commit;
+        $last_commits[$nid] = $commit_op;
       }
     }
   }

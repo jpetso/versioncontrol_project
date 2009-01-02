@@ -36,12 +36,9 @@ function versioncontrol_project_lines_changed($op, $options = NULL, $node = NULL
       }
       else {
         $repository = versioncontrol_get_repository($repo_id);
-        if (!isset($repository) || !versioncontrol_backend_implements($repository['vcs'], 'get_commit_statistics'))
-        {
-          $backend = versioncontrol_get_backend($repository);
-          $error_message = t('The @vcs backend has no support for commit statistics.',
-            array('@vcs' => $backend['name'])
-          );
+        if (!isset($repository)) {
+          $error_message = t('Repository with repository id !id not found.',
+                              array('!id' => $repo_id));
         }
       }
 
@@ -56,15 +53,17 @@ function versioncontrol_project_lines_changed($op, $options = NULL, $node = NULL
       $constraints = array(
         'date_lower' => time() - (60 * 60 * 24 * 7),
       );
-      $constraints = versioncontrol_project_get_commit_constraints(
+      $constraints = versioncontrol_project_get_operation_constraints(
         $constraints, array('nids' => array($node->nid))
       );
-      $commits = versioncontrol_get_commits($constraints);
+      $commit_operations = versioncontrol_get_commit_operations($constraints);
       $count = 0;
-      foreach ($commits as $key => $commit) {
-        $statistics = versioncontrol_get_commit_statistics($commit);
-        $count += $statistics['lines_added'];
-        $count += $statistics['lines_removed'];
+      foreach ($commit_operations as $key => $commit_operation) {
+        $operation_items = versioncontrol_get_operation_items($commit_operation, TRUE);
+        foreach ($operation_items as $path => $item) {
+          $count += $item['line_changes']['added'];
+          $count += $item['line_changes']['removed'];
+        }
       }
 
       return array(
