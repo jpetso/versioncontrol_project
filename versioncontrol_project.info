@@ -1,5 +1,7 @@
 ; $Id$
 name = "Version Control / Project Node Integration"
 description = "Integrates project nodes (provided by the Project module) with version control systems supported by the Version Control API."
-dependencies = versioncontrol project
+dependencies[] = versioncontrol
+dependencies[] = project
 package = Version Control
+core = 6.x

@@ -10,6 +10,7 @@
  * providing node metrics based on VCS data.
  *
  * Copyright 2007 by Peter Cawley ("corsix", http://drupal.org/user/210422)
+ * Copyright 2008 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
 
 function versioncontrol_project_metrics_functions() {
