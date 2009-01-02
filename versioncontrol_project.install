@@ -75,35 +75,18 @@ function versioncontrol_project_uninstall() {
 }
 
 
-// Update functions.
+// Update functions. To be named versioncontrol_project_update_xyzz(), where x
+// is the major version of Drupal core, y is the major version of this module
+// for this version of Drupal core, and zz is a consecutive number.
 
-function versioncontrol_project_update_1() {
+// versioncontrol_project_update_2() was the last update on Drupal 5.x (-2.x).
+
+/**
+ * Update 6100: Blah blah blah.
+ */
+/*function versioncontrol_project_update_6100() {
   $ret = array();
-
-  // Remove the unique key (repo_id, directory) because there can be multiple
-  // "empty" projects with keys (0, ''). Instead, have a non-unique index.
-  switch ($GLOBALS['db_type']) {
-    case 'mysqli':
-    case 'mysql':
-      $ret[] = update_sql('ALTER TABLE {versioncontrol_project_projects}
-                           DROP KEY repo_id');
-      $ret[] = update_sql('ALTER TABLE {versioncontrol_project_projects}
-                           ADD KEY repo_id_directory (repo_id, directory)');
-      break;
-    case 'pgsql':
-      $ret[] = update_sql('ALTER TABLE {versioncontrol_project_projects}
-                           DROP CONSTRAINT {versioncontrol_project_projects}_repo_id_key');
-      $ret[] = update_sql('CREATE INDEX {versioncontrol_project_projects}_repo_id_directory_idx
-                           ON {versioncontrol_project_projects} (repo_id, directory)');
-      break;
-  }
+  $ret[] = update_sql('UPDATE {versioncontrol_project_blah}
+                        SET value = othervalue');
   return $ret;
-}
-
-function versioncontrol_project_update_2() {
-  $ret = array();
-
-  // Remove the owner_uid column.
-  $ret[] = update_sql('ALTER TABLE {versioncontrol_project_projects} DROP COLUMN owner_uid');
-  return $ret;
-}
+}*/
