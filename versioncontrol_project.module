@@ -7,11 +7,17 @@
  * by the Version Control API.
  *
  * Copyright 2006, 2007 Derek Wright ("dww" , http://drupal.org/user/46549)
- * Copyright 2007, 2008 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
+ * Copyright 2007, 2008, 2009 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
 
-if (module_exists('metrics')) {
-  include_once(drupal_get_path('module', 'versioncontrol_project') .'/versioncontrol_project.metrics.inc');
+/**
+ * Implementation of hook_boot():
+ * Code that is run on every page request (even on cached ones).
+ */
+function versioncontrol_project_boot() {
+  if (module_exists('metrics')) {
+    include_once(drupal_get_path('module', 'versioncontrol_project') .'/versioncontrol_project.metrics.inc');
+  }
 }
 
 /**
@@ -38,84 +44,101 @@ function versioncontrol_project_enable() {
 /**
  * Implementation of hook_menu().
  */
-function versioncontrol_project_menu($may_cache) {
-  global $user;
+function versioncontrol_project_menu() {
   $items = array();
-  $admin_access = user_access('administer version control systems');
 
-  if ($may_cache) {
-    $items[] = array(
-      'path' => 'admin/project/versioncontrol-settings/project',
-      'title' => t('Project node integration'),
-      'description' => t('Specify the content types that will be integrated with version control systems, and configure how this will be done.'),
-      'callback' => 'drupal_get_form',
-      'callback arguments' => array('versioncontrol_project_admin_form'),
-      'access' => $admin_access,
-      'type' => MENU_LOCAL_TASK,
-    );
-  }
-  else {
-    if (arg(0) == 'node' && is_numeric(arg(1))) {
-      // If a user is viewing a project node that they own (or the user has
-      // the 'administer nodes' permission), add the 'Commit access' tab,
-      // but only if the project is associated with a repository.
-      $node = node_load(arg(1));
-      if (isset($node->versioncontrol_project)) {
-        $repo_id = $node->versioncontrol_project['repo_id'];
-        $node_access = node_access('view', $node);
+  $items['admin/project/versioncontrol-settings/project'] = array(
+    'title' => 'Project node integration',
+    'description' => 'Specify the content types that will be integrated with version control systems, and configure how this will be done.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('versioncontrol_project_admin_form'),
+    'access callback' => 'versioncontrol_admin_access',
+    'type' => MENU_LOCAL_TASK,
+  );
 
-        if ($repo_id > 0) {
-          $items[] = array(
-            'path' => 'node/'. $node->nid .'/commitlog',
-            'title' => t('Commits'),
-            'callback' => 'versioncontrol_project_commitlog',
-            'callback arguments' => array($node),
-            'access' => $node_access,
-            'type' => MENU_CALLBACK,
-            'weight' => 4,
-          );
-          $items[] = array(
-            'path' => 'node/'. $node->nid .'/developers',
-            'title' => t('Developers'),
-            'callback' => 'versioncontrol_project_developers',
-            'callback arguments' => array($node),
-            'access' => $node_access,
-            'type' => MENU_CALLBACK,
-            'weight' => 6,
-          );
+  // Two publicly viewable extensions to the project node.
+  $items['node/%versioncontrol_project_node/commitlog'] = array(
+    'title' => 'Commit messages',
+    'page callback' => 'versioncontrol_project_commitlog',
+    'page arguments' => array(1),
+    'access callback' => 'node_access',
+    'access arguments' => array('view', 1),
+    'type' => MENU_CALLBACK,
+    'weight' => 4,
+  );
+  $items['node/%versioncontrol_project_node/developers'] = array(
+    'title' => 'Developers',
+    'page callback' => 'versioncontrol_project_developers',
+    'page arguments' => array(1),
+    'access callback' => 'node_access',
+    'access arguments' => array('view', 1),
+    'type' => MENU_CALLBACK,
+    'weight' => 6,
+  );
 
-          $repository = versioncontrol_get_repository($repo_id);
+  // If a user is viewing a project node that they own (or the user has
+  // the 'administer nodes' permission), add the 'Commit access' tab,
+  // but only if the project is associated with a repository.
+  $items['node/%versioncontrol_project_node/commit-access'] = array(
+    'title' => 'Commit access',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('versioncontrol_project_commit_access_form', 1),
+    'access callback' => 'versioncontrol_project_commit_access_edit_access',
+    'access arguments' => array(1),
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 5,
+  );
+  $items['node/%versioncontrol_project_node/commit-access/%user/delete'] = array(
+    'title' => 'Commit access',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('versioncontrol_project_commit_access_delete_confirm', 1, 3),
+    'access callback' => 'versioncontrol_project_commit_access_edit_access',
+    'access arguments' => array(1),
+    'type' => MENU_CALLBACK,
+  );
 
-          if (($node->uid == $user->uid && versioncontrol_is_account_authorized($user->uid, $repository))
-              || $admin_access || user_access('administer nodes')) {
-            $items[] = array(
-              'path' => 'node/'. $node->nid .'/commit-access',
-              'title' => t('Commit access'),
-              'callback' => 'drupal_get_form',
-              'callback arguments' => array('versioncontrol_project_commit_access_form', $node),
-              'access' => $node_access,
-              'type' => MENU_LOCAL_TASK,
-              'weight' => 5,
-            );
-            if (is_numeric(arg(3)) && in_array(arg(3), $node->versioncontrol_project['comaintainer_uids'])) {
-              $deleted_uid = arg(3);
-              $items[] = array(
-                'path' => 'node/'. $node->nid .'/commit-access/'. $deleted_uid .'/delete',
-                'callback' => 'drupal_get_form',
-                'callback arguments' => array(
-                  'versioncontrol_project_commit_access_delete_confirm',
-                  $node, $deleted_uid,
-                ),
-                'access' => $node_access,
-                'type' => MENU_CALLBACK,
-              );
-            }
-          }
-        }
-      }
-    }
-  }
   return $items;
+}
+
+/**
+ * Menu wildcard loader for version control enabled project nodes
+ * ('%versioncontrol_project_node'). Returns FALSE if the project is not
+ * associated with any repository location, or the node object otherwise.
+ */
+function versioncontrol_project_node_load($nid) {
+  $node = node_load($nid);
+  if (!isset($node->versioncontrol_project)) && $node->versioncontrol_project['repo_id'] > 0) {
+    return $node;
+  }
+  return FALSE;
+}
+
+/**
+ * Custom access callback, ensuring that the current user (or the one given
+ * in @p $account, if set) is permitted to view and edit the list of people
+ * with commit access for a given project node.
+ *
+ * @param $project_node
+ *   A project node associated to a repository location, ideally loaded
+ *   with versioncontrol_project_node_load().
+ */
+function versioncontrol_project_commit_access_edit_access($project_node, $account = NULL) {
+  if (!node_access('view', $project_node, $account)) {
+    return FALSE;
+  }
+  $repo_id = $node->versioncontrol_project['repo_id'];
+  $repository = versioncontrol_get_repository($repo_id);
+
+  // Grant access to the node owner.
+  if ($project_node->uid == $account->uid
+      && versioncontrol_is_account_authorized($account->uid, $repository)) {
+    return TRUE;
+  }
+  // Grant access to version control and node admins.
+  if (versioncontrol_admin_access($account) || user_access('administer nodes', $account)) {
+    return TRUE;
+  }
+  return FALSE;
 }
 
 /**
@@ -420,7 +443,7 @@ function _versioncontrol_project_remove_trailing_slashes($directory) {
 
 
 /**
- * Form callback for 'node/$nid/commit-access':
+ * Form callback for 'node/%versioncontrol_project_node/commit-access':
  * Overview / management of project maintainers. This is just the minimal
  * version, the real form is done in the theming function further down,
  * as we don't want to drupal_render() the "new user" textfield and the
@@ -599,10 +622,10 @@ function versioncontrol_project_commit_access_form_submit($form_id, $form_values
 }
 
 /**
- * Form callback for 'node/$nid/commit-access/$uid/delete':
+ * Form callback for 'node/%versioncontrol_project_node/commit-access/%user/delete':
  * Provide a form to confirm deletion of a user's commit access.
  */
-function versioncontrol_project_commit_access_delete_confirm($node, $uid) {
+function versioncontrol_project_commit_access_delete_confirm($node, $deleted_user) {
   $form = array();
   $project = $node->versioncontrol_project;
 
@@ -610,7 +633,7 @@ function versioncontrol_project_commit_access_delete_confirm($node, $uid) {
     project_project_set_breadcrumb($node, array(l($node->title, 'node/'. $node->nid)));
   }
 
-  if ($uid == $node->uid) {
+  if ($deleted_user->uid == $node->uid) {
     drupal_set_title(t('User is locked'));
     $form['nodelete'] = array(
       '#type' => 'markup',
@@ -619,24 +642,22 @@ function versioncontrol_project_commit_access_delete_confirm($node, $uid) {
     return $form;
   }
 
-  $user = user_load(array('uid' => $uid));
-
-  if (!in_array($uid, $project['comaintainer_uids'])) {
+  if (!in_array($deleted_user->uid, $project['comaintainer_uids'])) {
     drupal_set_title(t('User is not a maintainer'));
     $form['nodelete'] = array(
       '#type' => 'markup',
       '#value' => t('!user does not have commit access so you cannot delete that.',
-                    array('!user' => theme('username', $user))),
+                    array('!user' => theme('username', $deleted_user))),
     );
     return $form;
   }
 
   $form['nid'] = array('#type' => 'value', '#value' => $node->nid);
-  $form['uid'] = array('#type' => 'value', '#value' => $uid);
+  $form['uid'] = array('#type' => 'value', '#value' => $deleted_user->uid);
 
   return confirm_form($form,
     t('Are you sure you want to revoke commit access for !user?',
-      array('!user' => theme('username', $user))),
+      array('!user' => theme('username', $deleted_user))),
     'node/'. $node->nid .'/commit-access',
     t('This action cannot be undone.'),
     t('Delete'),
@@ -659,7 +680,7 @@ function versioncontrol_project_commit_access_delete_confirm_submit($form_id, $f
 
 
 /**
- * Callback for "node/$nid/commitlog".
+ * Page callback for 'node/%versioncontrol_project_node/commitlog'.
  */
 function versioncontrol_project_commitlog($node) {
   drupal_set_title(t('Commits for @title', array('@title' => $node->title)));
@@ -671,7 +692,7 @@ function versioncontrol_project_commitlog($node) {
 }
 
 /**
- * Callback for "node/$nid/developers".
+ * Page callback for 'node/%versioncontrol_project_node/developers'.
  */
 function versioncontrol_project_developers($node) {
   $title = check_plain($node->title);
