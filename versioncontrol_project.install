@@ -12,46 +12,71 @@
  */
 
 /**
+ * Implementation of hook_schema().
+ */
+function versioncontrol_project_schema() {
+  $schema['versioncontrol_project_projects'] = array(
+    'description' => t('This table associates a project (given as node id) with a directory location in a version controlled repository.'),
+    'fields' => array(
+      'nid' => array(
+        'description' => t('The {node}.nid identifier of the project node.'),
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'repo_id' => array(
+        'description' => t('The {versioncontrol_repositories}.repo_id identifier of the repository where the project directory is located.'),
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'directory' => array(
+        'description' => t('The path of the project directory relative to the repository root, in the same format as {versioncontrol_item_revisions}.path (which means it starts with a slash and does not end with one).'),
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+    ),
+    'indexes' => array(
+      'repo_id_directory' => array('repo_id', 'directory'),
+    ),
+    'primary key' => array('nid'),
+  );
+
+  $schema['versioncontrol_project_comaintainers'] = array(
+    'description' => t('The list of project co-maintainers. The actual maintainer is the node owner and not stored in here, (s)he will be retrieved from {node}.uid rather than from this table.'),
+    'fields' => array(
+      'nid' => array(
+        'description' => t('The {node}.nid identifier of the project node where the user in {versioncontrol_project_comaintainers}.uid is listed as co-maintainer.'),
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'uid' => array(
+        'description' => t('The Drupal user id (referring to {users}.uid) of the co-maintainer.'),
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('nid', 'uid'),
+  );
+
+  return $schema;
+}
+
+/**
  * Implementation of hook_install().
  */
 function versioncontrol_project_install() {
-  switch ($GLOBALS['db_type']) {
-    case 'mysqli':
-    case 'mysql':
-      db_query("CREATE TABLE {versioncontrol_project_projects} (
-        nid int unsigned NOT NULL default 0,
-        repo_id int unsigned NOT NULL default 0,
-        directory varchar(255) NOT NULL default '',
-        PRIMARY KEY (nid),
-        KEY repo_id_directory (repo_id, directory)
-      ) /*!40100 DEFAULT CHARACTER SET utf8 */");
-
-      db_query("CREATE TABLE {versioncontrol_project_comaintainers} (
-        nid int unsigned NOT NULL default 0,
-        uid int unsigned NOT NULL default 0,
-        PRIMARY KEY (nid, uid)
-      ) /*!40100 DEFAULT CHARACTER SET utf8 */");
-      break;
-
-    case 'pgsql':
-      db_query("CREATE TABLE {versioncontrol_project_projects} (
-        nid int NOT NULL default 0,
-        repo_id int NOT NULL default 0,
-        directory varchar(255) NOT NULL default '',
-        PRIMARY KEY (nid)
-      )");
-      db_query("CREATE INDEX {versioncontrol_project_projects}_repo_id_directory_idx
-                ON {versioncontrol_project_projects} (repo_id, directory)");
-
-      db_query("CREATE TABLE {versioncontrol_project_comaintainers} (
-        nid int NOT NULL default 0,
-        uid int NOT NULL default 0,
-        PRIMARY KEY (nid, uid)
-      )");
-      break;
-  }
+  // Create tables.
+  drupal_install_schema('versioncontrol_project');
 }
-
 
 /**
  * Implementation of hook_uninstall().
@@ -69,9 +94,8 @@ function versioncontrol_project_uninstall() {
     variable_del($variable);
   }
 
-  // Drop tables.
-  db_query('DROP TABLE {versioncontrol_project_projects}');
-  db_query('DROP TABLE {versioncontrol_project_comaintainers}');
+  // Remove tables.
+  drupal_uninstall_schema('versioncontrol_project');
 }
 
 
