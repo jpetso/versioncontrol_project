@@ -701,7 +701,7 @@ function versioncontrol_project_user($type, &$edit, &$user, $category = NULL) {
       $total_commits += $project_stats['number_commits'];
 
       $nid = $project_stats['project']['nid'];
-      $project_name = l(check_plain($project_stats['name']), 'node/'. $nid);
+      $project_name = l($project_stats['name'], 'node/'. $nid);
       $number_commits_text = format_plural($project_stats['number_commits'],
                                            '1 commit', '@count commits');
       $project_titles[] = array(
@@ -750,7 +750,7 @@ function versioncontrol_project_block($op = 'list', $delta = 0) {
 
       foreach ($statistics as $project_stats) {
         $nid = $project_stats['project']['nid'];
-        $project_titles[] = l(check_plain($project_stats['name']), 'node/'. $nid);
+        $project_titles[] = l($project_stats['name'], 'node/'. $nid);
       }
       if (!empty($project_titles)) {
         $block = array(
