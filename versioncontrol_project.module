@@ -358,7 +358,7 @@ function versioncontrol_project_form_alter($form_id, &$form) {
  */
 function versioncontrol_project_form_validate($form_id, $form_values) {
   $repo_id = $form_values['repo_id'];
-  $admin_access = user_access('administer version control systems');
+  $admin_access = versioncontrol_admin_access();
 
   // Don't allow changing the repository after the project has been created.
   if (is_numeric($form_values['nid'])) {
@@ -1323,7 +1323,7 @@ function versioncontrol_project_delete_project($nid) {
  */
 function versioncontrol_project_creation_is_allowed($uid) {
   if (variable_get('versioncontrol_project_restrict_creation', 1)) {
-    if (user_access('administer nodes') || user_access('administer version control systems')) {
+    if (user_access('administer nodes') || versioncontrol_admin_access()) {
       return TRUE;
     }
 
