@@ -16,24 +16,24 @@
  */
 function versioncontrol_project_schema() {
   $schema['versioncontrol_project_projects'] = array(
-    'description' => t('This table associates a project (given as node id) with a directory location in a version controlled repository.'),
+    'description' => 'This table associates a project (given as node id) with a directory location in a version controlled repository.',
     'fields' => array(
       'nid' => array(
-        'description' => t('The {node}.nid identifier of the project node.'),
+        'description' => 'The {node}.nid identifier of the project node.',
         'type' => 'int',
         'unsigned' => TRUE,
         'not null' => TRUE,
         'default' => 0,
       ),
       'repo_id' => array(
-        'description' => t('The {versioncontrol_repositories}.repo_id identifier of the repository where the project directory is located.'),
+        'description' => 'The {versioncontrol_repositories}.repo_id identifier of the repository where the project directory is located.',
         'type' => 'int',
         'unsigned' => TRUE,
         'not null' => TRUE,
         'default' => 0,
       ),
       'directory' => array(
-        'description' => t('The path of the project directory relative to the repository root, in the same format as {versioncontrol_item_revisions}.path (which means it starts with a slash and does not end with one).'),
+        'description' => 'The path of the project directory relative to the repository root, in the same format as {versioncontrol_item_revisions}.path (which means it starts with a slash and does not end with one).',
         'type' => 'varchar',
         'length' => 255,
         'not null' => TRUE,
@@ -47,17 +47,17 @@ function versioncontrol_project_schema() {
   );
 
   $schema['versioncontrol_project_comaintainers'] = array(
-    'description' => t('The list of project co-maintainers. The actual maintainer is the node owner and not stored in here, (s)he will be retrieved from {node}.uid rather than from this table.'),
+    'description' => 'The list of project co-maintainers. The actual maintainer is the node owner and not stored in here, (s)he will be retrieved from {node}.uid rather than from this table.',
     'fields' => array(
       'nid' => array(
-        'description' => t('The {node}.nid identifier of the project node where the user in {versioncontrol_project_comaintainers}.uid is listed as co-maintainer.'),
+        'description' => 'The {node}.nid identifier of the project node where the user in {versioncontrol_project_comaintainers}.uid is listed as co-maintainer.',
         'type' => 'int',
         'unsigned' => TRUE,
         'not null' => TRUE,
         'default' => 0,
       ),
       'uid' => array(
-        'description' => t('The Drupal user id (referring to {users}.uid) of the co-maintainer.'),
+        'description' => 'The Drupal user id (referring to {users}.uid) of the co-maintainer.',
         'type' => 'int',
         'unsigned' => TRUE,
         'not null' => TRUE,
