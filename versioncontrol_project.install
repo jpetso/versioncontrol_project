@@ -108,7 +108,7 @@ function versioncontrol_project_uninstall() {
 /**
  * Update 6100: Blah blah blah.
  */
-/*function versioncontrol_project_update_6100() {
+/* function versioncontrol_project_update_6100() {
   $ret = array();
   $ret[] = update_sql('UPDATE {versioncontrol_project_blah}
                         SET value = othervalue');

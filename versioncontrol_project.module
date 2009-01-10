@@ -279,10 +279,8 @@ function versioncontrol_project_nodeapi(&$node, $op, $arg = NULL) {
  * Add a fieldset to the add/edit project form where the user can specify
  * the project's repository and path.
  */
-function versioncontrol_project_form_alter($form_id, &$form) {
-  if (isset($form['#id']) && $form['#id'] == 'node-form'
-      && $form['#node']->type == 'project_project')
-  {
+function versioncontrol_project_form_alter(&$form, $form_state, $form_id) {
+  if (isset($form['#id']) && $form['#id'] == 'node-form' && $form['#node']->type == 'project_project') {
     $node = $form['#node'];
     $project = isset($node->versioncontrol_project) ? $node->versioncontrol_project : NULL;
     $accounts = versioncontrol_get_accounts(array('uids' => array($node->uid)));
@@ -321,7 +319,7 @@ function versioncontrol_project_form_alter($form_id, &$form) {
     }
 
     // We're ready to go, add the form elements now.
-    $form['#validate']['versioncontrol_project_form_validate'] = array();
+    $form['#validate'][] = 'versioncontrol_project_form_validate';
 
     $form['versioncontrol_project'] = array(
       '#type' => 'fieldset',
@@ -356,16 +354,18 @@ function versioncontrol_project_form_alter($form_id, &$form) {
 /**
  * Validate the add/edit project form before it is submitted.
  */
-function versioncontrol_project_form_validate($form_id, $form_values) {
-  $repo_id = $form_values['repo_id'];
+function versioncontrol_project_form_validate($form, &$form_state) {
+  $repo_id = $form_state['values']['repo_id'];
   $admin_access = versioncontrol_admin_access();
 
   // Don't allow changing the repository after the project has been created.
-  if (is_numeric($form_values['nid'])) {
-    $project = versioncontrol_project_get_project($form_values['nid'], TRUE);
+  if (is_numeric($form_state['values']['nid'])) {
+    $project = versioncontrol_project_get_project($form_state['values']['nid'], TRUE);
 
     if (!$admin_access && isset($project) && $repo_id != $project['repo_id']) {
-      form_set_error('repo_id', t('You do not have permission to modify the repository for this project. (The repository can\'t be changed after the project has been created.)'));
+      form_error($form['versioncontrol_project']['existing_repository']['repo_id'],
+        t('You do not have permission to modify the repository for this project. (The repository can\'t be changed after the project has been created.)')
+      );
       return;
     }
   }
@@ -378,25 +378,34 @@ function versioncontrol_project_form_validate($form_id, $form_values) {
   $repository = versioncontrol_get_repository($repo_id);
 
   if (!isset($repository)) {
-    form_set_error('repo_id', t('You must select a valid repository.'));
+    form_set_error($form['versioncontrol_project']['existing_repository']['repo_id'],
+      t('You must select a valid repository.')
+    );
     return;
   }
-  if (empty($form_values['project_directory'])) {
-    form_set_error('project_directory', t('You can not specify a directory if there is no repository for this project.'));
+  if (empty($form_state['values']['project_directory'])) {
+    form_error($form['versioncontrol_project']['project_directory'],
+      t('You can not specify a directory if there is no repository for this project.')
+    );
     return;
   }
 
-  $directory = _versioncontrol_project_remove_trailing_slashes($form_values['project_directory']);
-
+  $directory = _versioncontrol_project_remove_trailing_slashes(
+    $form_state['values']['project_directory']
+  );
   if (!preg_match('/^[a-zA-Z0-9\/_-]+$/', $directory)) {
-    form_set_error('project_directory', t("The path of the project directory can only contain letters, numbers, slashes ('/'), hyphens ('-') and underscores ('_')."));
+    form_error($form['versioncontrol_project']['project_directory'],
+      t("The path of the project directory can only contain letters, numbers, slashes ('/'), hyphens ('-') and underscores ('_').")
+    );
     return;
   }
 
   // Don't do this if another project with the same directory already exists.
   $existing_project = versioncontrol_project_get_project_for_item($repository, $directory, TRUE);
-  if (isset($existing_project) && $existing_project['nid'] != $form_values['nid']) {
-    form_set_error('project_directory', t('The specified project directory conflicts with that of an existing project.'));
+  if (isset($existing_project) && $existing_project['nid'] != $form_state['values']['nid']) {
+    form_error($form['versioncontrol_project']['project_directory'],
+      t('The specified project directory conflicts with that of an existing project.')
+    );
     return;
   }
 
@@ -404,9 +413,9 @@ function versioncontrol_project_form_validate($form_id, $form_values) {
   // module test, I still hope that we might go back to supporting any kind
   // of content type sometime again.
   if (module_exists('project')) {
-    if (project_use_taxonomy() && isset($form_values['project_type'])
+    if (project_use_taxonomy() && isset($form_state['values']['project_type'])
         && variable_get('versioncontrol_project_dir_validate_by_type', 1)) {
-      $project_type_tid = $form_values['project_type'];
+      $project_type_tid = $form_state['values']['project_type'];
       $tree = taxonomy_get_term($project_type_tid);
 
       $dir_regexp = variable_get('versioncontrol_project_directory_tid_'. $project_type_tid, '');
@@ -414,7 +423,9 @@ function versioncontrol_project_form_validate($form_id, $form_values) {
       if (!empty($dir_regexp)) { // empty means "all directories allowed"
         $directory_with_slash = ($directory == '/') ? '/' : $directory .'/';
         if (!preg_match($dir_regexp, $directory_with_slash)) {
-          form_set_error('project_directory', t("The root of the project directory does not match the selected project type (%type). Given the current project type, the directory path should match the following regular expression: %goal.", array('%type' => $tree->name, '%goal' => $dir_regexp)));
+          form_error($form['versioncontrol_project']['project_directory'],
+            t('The root of the project directory does not match the selected project type (%type). Given the current project type, the directory path should match the following regular expression: %goal.', array('%type' => $tree->name, '%goal' => $dir_regexp))
+          );
           return;
         }
       }
@@ -422,8 +433,10 @@ function versioncontrol_project_form_validate($form_id, $form_values) {
 
     if (variable_get('versioncontrol_project_validate_by_short_name', 1)) {
       $last_element = array_pop(explode('/', $directory));
-      if ($last_element != $form_values['uri']) {
-        form_set_error('project_directory', t("The last part of the project directory (%last) does not match the short project name (%short).", array('%last' => $last_element, '%short' => $form_values['uri'])));
+      if ($last_element != $form_state['values']['uri']) {
+        form_error($form['versioncontrol_project']['project_directory'],
+          t('The last part of the project directory (%last) does not match the short project name (%short).', array('%last' => $last_element, '%short' => $form_state['values']['uri']))
+        );
         return;
       }
     }
@@ -518,7 +531,7 @@ function versioncontrol_project_commit_access_form($node) {
  * The maintainers table for the above commit access form,
  * constructed by means of an '#after_build' callback function.
  */
-function versioncontrol_project_commit_access_table(&$form, $form_values) {
+function versioncontrol_project_commit_access_table($form, $form_state) {
   $node = $form['#node'];
   $project = $node->versioncontrol_project;
   $project_repository = $form['#repository'];
@@ -528,8 +541,8 @@ function versioncontrol_project_commit_access_table(&$form, $form_values) {
   $header[] = array('data' => t('Drupal username'), 'field' => 'name');
   $header[] = array('data' => t('Actions'));
 
-  // The owner of the node automatically gets commit access, list this
-  // user as the first row in the table, and don't allow any operations.
+  // The owner of the node automatically gets commit access, list this user
+  // as the first row in the table, and don't allow any operations.
   $rows[] = array(
     theme('username', $node), // theme_username() only needs ->uid and ->name.
     '<span class="disabled">'. t('locked') .'</span>'
@@ -567,13 +580,13 @@ function versioncontrol_project_commit_access_table(&$form, $form_values) {
  * The validation hook for the commit access form:
  * check the validity of the new project maintainer that should be added.
  */
-function versioncontrol_project_commit_access_form_validate($form_id, $form_values, $form) {
-  $username = $form_values['username'];
-  $repo_id = $form_values['repo_id'];
-  $maintainer_uids = explode(',', $form_values['maintainer_uids']);
+function versioncontrol_project_commit_access_form_validate($form, &$form_state) {
+  $username = $form_state['values']['username'];
+  $repo_id = $form_state['values']['repo_id'];
+  $maintainer_uids = explode(',', $form_state['values']['maintainer_uids']);
 
   if (empty($username)) {
-    form_set_error('username', t('You must specify a valid user name.'));
+    form_error($form['table']['username'], t('You must specify a valid user name.'));
     return;
   }
 
@@ -581,7 +594,9 @@ function versioncontrol_project_commit_access_form_validate($form_id, $form_valu
                                       WHERE name = '%s'", $username));
 
   if (!isset($result)) {
-    form_set_error('username', t('%user is not a valid user on this site.', array('%user' => $username)), 'error');
+    form_error($form['table']['username'],
+      t('%user is not a valid user on this site.', array('%user' => $username))
+    );
     return;
   }
 
@@ -590,32 +605,32 @@ function versioncontrol_project_commit_access_form_validate($form_id, $form_valu
 
   if (!isset($vcs_username)) {
     $repository = versioncontrol_get_repository($repo_id);
-    form_set_error('username', t('%user does not have an account in @repository.', array('%user' => $username, '@repository' => $repository['name'])), 'error');
+    form_error($form['table']['username'], t('%user does not have an account in @repository.', array('%user' => $username, '@repository' => $repository['name'])));
     return;
   }
   if (in_array($uid, $maintainer_uids)) {
-    form_set_error('username', t('%user already has commit access for this project.', array('%user' => $username)), 'error');
+    form_error($form['table']['username'], t('%user already has commit access for this project.', array('%user' => $username)));
     return;
   }
 
   // Save the uid in the form so we don't have to look it up again in
   // submit(). We also stash user, since it's not set directly when
   // using the special theme function to generate the form.
-  form_set_value($form['uid'], $uid);
+  form_set_value($form['uid'], $uid, $form_state);
 }
 
 /**
  * The submit hook for the commit access form: add a new project maintainer.
  */
-function versioncontrol_project_commit_access_form_submit($form_id, $form_values) {
-  $nid = $form_values['nid'];
-  $uid = $form_values['uid'];
+function versioncontrol_project_commit_access_form_submit($form, &$form_state) {
+  $nid = $form_state['values']['nid'];
+  $uid = $form_state['values']['uid'];
   db_query("INSERT INTO {versioncontrol_project_comaintainers} (nid, uid)
             VALUES (%d, %d)", $nid, $uid);
 
   $user = new stdClass();
-  $user->uid = $form_values['uid'];
-  $user->name = $form_values['username'];
+  $user->uid = $form_state['values']['uid'];
+  $user->name = $form_state['values']['username'];
   drupal_set_message(t('Commit access has been granted to !user.', array(
     '!user' => theme('username', $user),
   )));
@@ -668,14 +683,14 @@ function versioncontrol_project_commit_access_delete_confirm($node, $deleted_use
 /**
  * Delete the repository when the confirmation form is submitted.
  */
-function versioncontrol_project_commit_access_delete_confirm_submit($form_id, $form_values) {
-  $nid = $form_values['nid'];
-  $uid = $form_values['uid'];
+function versioncontrol_project_commit_access_delete_confirm_submit($form, &$form_state) {
+  $nid = $form_state['values']['nid'];
+  $uid = $form_state['values']['uid'];
   $user = user_load(array('uid' => $uid));
   db_query('DELETE FROM {versioncontrol_project_comaintainers}
             WHERE nid = %d AND uid = %d', $nid, $uid);
   drupal_set_message(t('Commit access for !user has been revoked.', array('!user' => theme('username', $user))));
-  return 'node/'. $nid .'/commit-access';
+  $form_state['redirect'] = 'node/'. $nid .'/commit-access';
 }
 
 
