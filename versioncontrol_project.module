@@ -738,22 +738,12 @@ function versioncontrol_project_user($type, &$edit, &$user, $category = NULL) {
 
       $nid = $project_stats['project']['nid'];
       $project_name = l($project_stats['name'], 'node/'. $nid);
-      $number_commits_text = format_plural($project_stats['number_commits'],
-                                           '1 commit', '@count commits');
-      $project_titles[] = array(
-        'value' => t('!project-name (!how-many-commits)', array(
-          '!project-name' => $project_name,
-          '!how-many-commits' => $number_commits_text,
-        )),
-      );
-      /* TODO: Drupal 6 version, with a single function call.
-               (Drupal 5 doesn't yet support additional arguments.)
       $project_titles[] = array(
         'value' => format_plural($project_stats['number_commits'],
           '!project-name (1 commit)', '!project-name (@count commits)',
           array('!project-name' => $project_name)
         ),
-      );*/
+      );
     }
     if ($total_commits > 0) {
       $project_titles[] = array(
