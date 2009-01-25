@@ -107,7 +107,7 @@ function versioncontrol_project_menu() {
  */
 function versioncontrol_project_node_load($nid) {
   $node = node_load($nid);
-  if (!isset($node->versioncontrol_project)) && $node->versioncontrol_project['repo_id'] > 0) {
+  if (!empty($node->versioncontrol_project) && $node->versioncontrol_project['repo_id'] > 0) {
     return $node;
   }
   return FALSE;
@@ -473,18 +473,10 @@ function versioncontrol_project_commit_access_form($node) {
     project_project_set_breadcrumb($node);
   }
 
-  $form['nid'] = array(
-    '#type' => 'value',
-    '#value' => $node->nid,
-  );
-  $form['repo_id'] = array(
-    '#type' => 'value',
-    '#value' => $project['repo_id'],
-  );
-  $form['maintainer_uids'] = array(
-    '#type' => 'value',
-    '#value' => implode(',', $project['maintainer_uids']),
-  );
+  $form['#nid'] = $node->nid;
+  $form['#repo_id'] = $project['repo_id'];
+  $form['#maintainer_uids'] = $project['maintainer_uids'];
+
   // The user id for a new project co-maintainer,
   // we'll fill this in with a real value during the validation hook.
   $form['uid'] = array(
@@ -582,8 +574,8 @@ function versioncontrol_project_commit_access_table($form, $form_state) {
  */
 function versioncontrol_project_commit_access_form_validate($form, &$form_state) {
   $username = $form_state['values']['username'];
-  $repo_id = $form_state['values']['repo_id'];
-  $maintainer_uids = explode(',', $form_state['values']['maintainer_uids']);
+  $repo_id = $form['#repo_id'];
+  $maintainer_uids = $form['#maintainer_uids'];
 
   if (empty($username)) {
     form_error($form['table']['username'], t('You must specify a valid user name.'));
@@ -623,7 +615,7 @@ function versioncontrol_project_commit_access_form_validate($form, &$form_state)
  * The submit hook for the commit access form: add a new project maintainer.
  */
 function versioncontrol_project_commit_access_form_submit($form, &$form_state) {
-  $nid = $form_state['values']['nid'];
+  $nid = $form['#nid'];
   $uid = $form_state['values']['uid'];
   db_query("INSERT INTO {versioncontrol_project_comaintainers} (nid, uid)
             VALUES (%d, %d)", $nid, $uid);
@@ -667,8 +659,8 @@ function versioncontrol_project_commit_access_delete_confirm($node, $deleted_use
     return $form;
   }
 
-  $form['nid'] = array('#type' => 'value', '#value' => $node->nid);
-  $form['uid'] = array('#type' => 'value', '#value' => $deleted_user->uid);
+  $form['#nid'] = $node->nid;
+  $form['#uid'] = $deleted_user->uid;
 
   return confirm_form($form,
     t('Are you sure you want to revoke commit access for !user?',
@@ -684,9 +676,9 @@ function versioncontrol_project_commit_access_delete_confirm($node, $deleted_use
  * Delete the repository when the confirmation form is submitted.
  */
 function versioncontrol_project_commit_access_delete_confirm_submit($form, &$form_state) {
-  $nid = $form_state['values']['nid'];
-  $uid = $form_state['values']['uid'];
-  $user = user_load(array('uid' => $uid));
+  $nid = $form['#nid'];
+  $uid = $form['#uid'];
+  $user = user_load($uid);
   db_query('DELETE FROM {versioncontrol_project_comaintainers}
             WHERE nid = %d AND uid = %d', $nid, $uid);
   drupal_set_message(t('Commit access for !user has been revoked.', array('!user' => theme('username', $user))));
