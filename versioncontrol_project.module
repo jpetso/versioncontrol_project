@@ -156,7 +156,7 @@ function versioncontrol_project_project_page_link_alter($node, &$all_links) {
  * Form callback for 'admin/project/versioncontrol-project':
  * Global settings for this module.
  */
-function versioncontrol_project_admin_form() {
+function versioncontrol_project_admin_form(&$form_state) {
   $form = array();
   $repositories = versioncontrol_get_repositories();
   $repository_options = array();
@@ -433,9 +433,12 @@ function versioncontrol_project_form_validate($form, &$form_state) {
 
     if (variable_get('versioncontrol_project_validate_by_short_name', 1)) {
       $last_element = array_pop(explode('/', $directory));
-      if ($last_element != $form_state['values']['uri']) {
+      if ($last_element != $form_state['values']['project']['uri']) {
         form_error($form['versioncontrol_project']['project_directory'],
-          t('The last part of the project directory (%last) does not match the short project name (%short).', array('%last' => $last_element, '%short' => $form_state['values']['uri']))
+          t('The last part of the project directory (%last) does not match the short project name (%short).', array(
+            '%last' => $last_element,
+            '%short' => $form_state['values']['project']['uri'],
+          ))
         );
         return;
       }
@@ -462,7 +465,7 @@ function _versioncontrol_project_remove_trailing_slashes($directory) {
  * as we don't want to drupal_render() the "new user" textfield and the
  * "Grant access" button at this point already.
  */
-function versioncontrol_project_commit_access_form($node) {
+function versioncontrol_project_commit_access_form(&$form_state, $node) {
   $form = array();
   $project = $node->versioncontrol_project;
   $repository = versioncontrol_get_repository($project['repo_id']);
@@ -632,7 +635,7 @@ function versioncontrol_project_commit_access_form_submit($form, &$form_state) {
  * Form callback for 'node/%versioncontrol_project_node/commit-access/%user/delete':
  * Provide a form to confirm deletion of a user's commit access.
  */
-function versioncontrol_project_commit_access_delete_confirm($node, $deleted_user) {
+function versioncontrol_project_commit_access_delete_confirm(&$form_state, $node, $deleted_user) {
   $form = array();
   $project = $node->versioncontrol_project;
 
