@@ -470,8 +470,6 @@ function versioncontrol_project_commit_access_form(&$form_state, $node) {
   $project = $node->versioncontrol_project;
   $repository = versioncontrol_get_repository($project['repo_id']);
 
-  drupal_set_title(t('Commit access for @title', array('@title' => $node->title)));
-
   if ($node->type == 'project_project') {
     project_project_set_breadcrumb($node);
   }
