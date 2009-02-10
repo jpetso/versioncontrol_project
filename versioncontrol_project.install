@@ -67,6 +67,48 @@ function versioncontrol_project_schema() {
     'primary key' => array('nid', 'uid'),
   );
 
+  $schema['versioncontrol_project_items'] = array(
+    'description' => 'An association of repository items in {versioncontrol_item_revisions} to projects in {versioncontrol_project_projects}.',
+    'fields' => array(
+      'item_revision_id' => array(
+        'description' => 'The {versioncontrol_item_revisions}.item_revision_id identifier that belongs to the project.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'nid' => array(
+        'description' => 'The {node}.nid identifier of the project node that the item belongs to. VERSIONCONTROL_PROJECT_NID_NONE (== 0) for items which do not belong to any project. VERSIONCONTROL_PROJECT_NID_NONE and actual (positive) nids are mutually exclusive for any given item_revision_id.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('item_revision_id', 'nid'),
+  );
+
+  $schema['versioncontrol_project_operations'] = array(
+    'description' => 'An association of operations in {versioncontrol_operations} to projects in {versioncontrol_project_projects}. This is just a cache built out of {versioncontrol_project_items}, for more efficient joins in repository queries, and unlike {versioncontrol_project_items} does not contain items with nid == VERSIONCONTROL_PROJECT_NID_NONE.',
+    'fields' => array(
+      'vc_op_id' => array(
+        'description' => 'The {versioncontrol_operations}.vc_op_id identifier that is related to the project.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'nid' => array(
+        'description' => 'The {node}.nid identifier of the project node that the operation took place in.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('vc_op_id', 'nid'),
+  );
+
   return $schema;
 }
 
@@ -106,11 +148,56 @@ function versioncontrol_project_uninstall() {
 // versioncontrol_project_update_2() was the last update on Drupal 5.x (-2.x).
 
 /**
- * Update 6100: Blah blah blah.
+ * Update 6100: Add the project/item association table and the related
+ *   project/operation association cache built out of the former.
  */
-/* function versioncontrol_project_update_6100() {
+function versioncontrol_project_update_6100() {
   $ret = array();
-  $ret[] = update_sql('UPDATE {versioncontrol_project_blah}
-                        SET value = othervalue');
+
+  $project_item_table = array(
+    'fields' => array(
+      'item_revision_id' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('item_revision_id', 'nid'),
+  );
+  $project_operations_table = array(
+    'fields' => array(
+      'vc_op_id' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('vc_op_id', 'nid'),
+  );
+
+  db_create_table($ret, 'versioncontrol_project_items', $project_item_table);
+  db_create_table($ret, 'versioncontrol_project_operations', $project_operations_table);
+
+  require_once(drupal_get_path('module', 'versioncontrol_project') .'/versioncontrol_project.module');
+  _versioncontrol_project_write_missing_item_associations();
+  $ret[] = array(
+    'success' => TRUE,
+    'query' => t('Countless queries (probably), inserting project associations into {versioncontrol_project_items} and {versioncontrol_project_operations}.'),
+  );
+
   return $ret;
-}*/
+}

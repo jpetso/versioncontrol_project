@@ -10,6 +10,12 @@
  * Copyright 2007, 2008, 2009 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
 
+// The nid used for project/item associations in {versioncontrol_project_items}
+// that have been checked, but are not associated to any project.
+// Useful for keeping track of which items have been checked and which haven't.
+define('VERSIONCONTROL_PROJECT_NID_NONE', 0);
+
+
 /**
  * Implementation of hook_boot():
  * Code that is run on every page request (even on cached ones).
@@ -38,6 +44,32 @@ function versioncontrol_project_enable() {
       $project['repo_id'] = 0;
       versioncontrol_project_set_project($project);
     }
+  }
+
+  _versioncontrol_project_write_missing_item_associations();
+}
+
+/**
+ * Check if any project/item associations have been missed, and if so,
+ * determine their status and write it to the database.
+ */
+function _versioncontrol_project_write_missing_item_associations() {
+  // SELECT item_revision_id WHERE ir NOT IN projitem
+  // ...only a tad more portable:
+  $result = db_query('
+    SELECT ir.item_revision_id, ir.repo_id, ir.path
+    FROM {versioncontrol_item_revisions} ir
+      LEFT JOIN {versioncontrol_project_items} projitem
+        ON ir.item_revision_id = projitem.item_revision_id
+    WHERE projitem.item_revision_id IS NULL');
+
+  while ($item = db_fetch_object($result)) {
+    $project = versioncontrol_project_get_project_for_item(
+      $item->repo_id, $item->path, TRUE // include unpublished projects
+    );
+    _versioncontrol_project_add_project_for_item($item->item_revision_id,
+      (empty($project) ? VERSIONCONTROL_PROJECT_NID_NONE : $project['nid'])
+    );
   }
 }
 
@@ -719,33 +751,46 @@ function versioncontrol_project_developers($node) {
  * Implementation of hook_user():
  * Add a list of projects to the user page that the user has committed to.
  */
-function versioncontrol_project_user($type, &$edit, &$user, $category = NULL) {
+function versioncontrol_project_user($type, &$edit, &$account, $category = NULL) {
   if ($type == 'view') {
-    $constraints = array('uids' => array($user->uid));
-    $statistics = versioncontrol_project_get_statistics($constraints);
+    $result = db_query('
+      SELECT n.nid, n.title, COUNT(projop.vc_op_id) as number_commits
+      FROM {versioncontrol_operations} op
+        INNER JOIN {versioncontrol_project_operations} projop
+          ON op.vc_op_id = projop.vc_op_id
+        INNER JOIN {node} n
+          ON projop.nid = n.nid
+      WHERE op.uid = %d AND op.type = %d AND n.status = 1
+      GROUP BY n.nid, n.title
+      ORDER BY number_commits DESC',
+      array($account->uid, VERSIONCONTROL_OPERATION_COMMIT)
+    );
     $project_titles = array();
     $total_commits = 0;
 
-    foreach ($statistics as $project_stats) {
-      $total_commits += $project_stats['number_commits'];
-
-      $nid = $project_stats['project']['nid'];
-      $project_name = l($project_stats['name'], 'node/'. $nid);
-      $project_titles[] = array(
-        'value' => format_plural($project_stats['number_commits'],
-          '!project-name (1 commit)', '!project-name (@count commits)',
-          array('!project-name' => $project_name)
-        ),
+    while ($project_stats = db_fetch_object($result)) {
+      $total_commits += $project_stats->number_commits;
+      $project_name = l($project_stats->title, 'node/'. $project_stats->nid);
+      $project_titles[] = format_plural($project_stats->number_commits,
+        '!project-name (1 commit)', '!project-name (@count commits)',
+        array('!project-name' => $project_name)
       );
     }
-    if ($total_commits > 0) {
-      $project_titles[] = array(
-        'value' => format_plural($total_commits,
-                                 'Total: 1 commit', 'Total: @count commits'),
+    if ($total_commits > 1) {
+      $project_titles[] = format_plural($total_commits,
+        '1 commit total', '@count commits total'
       );
     }
     if (!empty($project_titles)) {
-      return array(t('Projects') => $project_titles);
+      $account->content['versioncontrol_project'] = array(
+        '#type' => 'user_profile_category',
+        '#title' => t('Projects'),
+        '#attributes' => array('class' => 'versioncontrol-project-user-commits'),
+      );
+      $account->content['versioncontrol_project']['items'] = array(
+        '#type' => 'user_profile_item',
+        '#value' => theme('item_list', $project_titles),
+      );
     }
   }
 }
@@ -756,6 +801,7 @@ function versioncontrol_project_user($type, &$edit, &$user, $category = NULL) {
 function versioncontrol_project_block($op = 'list', $delta = 0) {
   if ($op == 'list') {
     $blocks[0]['info'] = t('Most active projects');
+    $blocks[0]['cache'] = BLOCK_NO_CACHE;
     return $blocks;
   }
   else if ($op == 'view') {
@@ -763,13 +809,24 @@ function versioncontrol_project_block($op = 'list', $delta = 0) {
       $interval = 7 * 24 * 60 * 60;
       $limit = 15;
 
-      $constraints = array('date_lower' => time() - $interval);
-      $statistics = versioncontrol_project_get_statistics($constraints, $limit);
+      $result = db_query_range('
+        SELECT n.nid, n.title, COUNT(projop.vc_op_id) as number_commits
+        FROM {versioncontrol_operations} op
+          INNER JOIN {versioncontrol_project_operations} projop
+            ON op.vc_op_id = projop.vc_op_id
+          INNER JOIN {node} n
+            ON projop.nid = n.nid
+        WHERE op.date >= %d AND op.type = %d AND n.status = 1
+        GROUP BY n.nid, n.title
+        ORDER BY number_commits DESC',
+        array(time() - $interval, VERSIONCONTROL_OPERATION_COMMIT),
+        0, $limit
+      );
       $project_titles = array();
 
-      foreach ($statistics as $project_stats) {
-        $nid = $project_stats['project']['nid'];
-        $project_titles[] = l($project_stats['name'], 'node/'. $nid);
+      while ($project_stats = db_fetch_object($result)) {
+        $nid = $project_stats->nid;
+        $project_titles[] = l($project_stats->title, 'node/'. $nid);
       }
       if (!empty($project_titles)) {
         $block = array(
@@ -951,12 +1008,17 @@ function versioncontrol_project_get_projects_for_maintainer($uid, $include_unpub
  *   is again a structured array that consists of the following elements:
  *
  *   - 'nid': The node id of the project node.
+ *   - 'repo_ids': An array of repository ids of the repositories where
+ *        project directories are located.
+ *   - 'directories': An array of project directories inside the repository.
  *   - 'owner_uid': The Drupal user id of the project owner.
- *   - 'repo_id': The repository id of the repository where the project resides.
- *   - 'directory': The project directory inside the repository.
  *   - 'maintainer_uids': An array containing all maintainer uids, that is,
  *        the project owner and the co-maintainers.
  *   - 'comaintainer_uids': An array containing all co-maintainer uids.
+ *   - 'vc_op_ids': An array containing identifiers of version control
+ *        operations that are associated to the project.
+ *   - 'item_revision_ids': An array containing identifiers of repository items
+ *        that are associated to the project.
  *
  *   If not a single project matches these constraints,
  *   an empty array is returned.
@@ -971,6 +1033,7 @@ function versioncontrol_project_get_projects($constraints = array(), $include_un
 
   $and_constraints = array();
   $params = array();
+  $joins = array();
 
   if (!$include_unpublished) {
     $and_constraints[] = 'n.status = 1';
@@ -991,12 +1054,41 @@ function versioncontrol_project_get_projects($constraints = array(), $include_un
     }
   }
 
+  if (isset($constraints['repo_ids'])) {
+    if (empty($constraints['repo_ids'])) {
+      $and_constraints[] = 'FALSE';
+    }
+    else {
+      $placeholders = array();
+      foreach ($constraints['repo_ids'] as $repo_id) {
+        $placeholders[] = '%d';
+        $params[] = $repo_id;
+      }
+      $and_constraints[] = 'p.repo_id IN (' . implode(',', $placeholders) .')';
+    }
+  }
+
+  if (isset($constraints['directories'])) {
+    if (empty($constraints['directories'])) {
+      $and_constraints[] = 'FALSE';
+    }
+    else {
+      $placeholders = array();
+      foreach ($constraints['directories'] as $directory) {
+        $placeholders[] = "'%s'";
+        $params[] = $directory;
+      }
+      $and_constraints[] = 'p.directory IN (' . implode(',', $placeholders) .')';
+    }
+  }
+
   // project owner constraints
   if (isset($constraints['owner_uids'])) {
     if (empty($constraints['owner_uids'])) {
       $and_constraints[] = 'FALSE';
     }
     else {
+      $or_constraints = array();
       foreach ($constraints['owner_uids'] as $uid) {
         $or_constraints[] = 'n.uid = %d';
         $params[] = $uid;
@@ -1006,15 +1098,15 @@ function versioncontrol_project_get_projects($constraints = array(), $include_un
   }
 
   // project maintainer (= owner or co-maintainer) constraints
-  $maintainer_join = '';
   if (isset($constraints['maintainer_uids'])) {
     if (empty($constraints['maintainer_uids'])) {
       $and_constraints[] = 'FALSE';
     }
     else {
-      $maintainer_join = ' LEFT JOIN {versioncontrol_project_comaintainers} c
-                          ON p.nid = c.nid';
+      $joins[] = 'LEFT JOIN {versioncontrol_project_comaintainers} c
+                    ON p.nid = c.nid';
 
+      $or_constraints = array();
       foreach ($constraints['maintainer_uids'] as $uid) {
         $or_constraints[] = 'n.uid = %d';
         $params[] = $uid;
@@ -1025,12 +1117,47 @@ function versioncontrol_project_get_projects($constraints = array(), $include_un
     }
   }
 
+  if (isset($constraints['vc_op_ids'])) {
+    if (empty($constraints['vc_op_ids'])) {
+      $and_constraints[] = 'FALSE';
+    }
+    else {
+      $joins[] = 'INNER JOIN {versioncontrol_project_operations} projop
+                    ON p.nid = projop.nid';
+
+      $placeholders = array();
+      foreach ($constraints['vc_op_ids'] as $vc_op_id) {
+        $placeholders[] = '%d';
+        $params[] = $vc_op_id;
+      }
+      $and_constraints[] = 'projop.vc_op_id IN (' . implode(',', $placeholders) .')';
+    }
+  }
+
+  if (isset($constraints['item_revision_ids'])) {
+    if (empty($constraints['item_revision_ids'])) {
+      $and_constraints[] = 'FALSE';
+    }
+    else {
+      $joins[] = 'INNER JOIN {versioncontrol_project_items} projitem
+                    ON p.nid = projitem.nid';
+
+      $placeholders = array();
+      foreach ($constraints['item_revision_ids'] as $item_revision_id) {
+        $placeholders[] = '%d';
+        $params[] = $item_revision_id;
+      }
+      $and_constraints[] = 'projitem.item_revision_id IN (' . implode(',', $placeholders) .')';
+    }
+  }
+
   $where = empty($and_constraints) ? '' : ' WHERE '. implode(' AND ', $and_constraints);
+  $joins = empty($joins) ? '' : ' '. implode(' ', $joins);
 
   $result = db_query('SELECT DISTINCT(p.nid), n.uid, p.repo_id, p.directory
                       FROM {versioncontrol_project_projects} p
-                       INNER JOIN {node} n ON p.nid = n.nid'.
-                      $maintainer_join . $where, $params);
+                        INNER JOIN {node} n ON p.nid = n.nid'. $joins . $where,
+                      $params);
 
   $projects = array();
   while ($project = db_fetch_object($result)) {
@@ -1079,7 +1206,7 @@ function _versioncontrol_project_get_comaintainers($nid) {
  * Retrieve the project for the given item (file or directory) in a repository.
  *
  * @param $repository
- *   The repository which contains the item.
+ *   The repository which contains the item, or a plain repo_id.
  * @param $item
  *   The path of the item, or a whole item array.
  * @param $include_unpublished
@@ -1103,7 +1230,7 @@ function _versioncontrol_project_get_comaintainers($nid) {
  */
 function versioncontrol_project_get_project_for_item($repository, $item, $include_unpublished = FALSE) {
   static $projects_for_item = array();
-  $repo_id = $repository['repo_id'];
+  $repo_id = is_array($repository) ? $repository['repo_id'] : $repository;
 
   if (!isset($projects_for_item[$repo_id])) {
     $projects_for_item[$repo_id] = array();
@@ -1135,28 +1262,13 @@ function versioncontrol_project_get_project_for_item($repository, $item, $includ
       // in an array - and query them all at once ("OR" for directory paths).
       // The directory with the longest string length is the one that applies.
       // (Make sure to use the cache still, otherwise that might backfire.)
-
-      $result = db_query("SELECT p.nid, n.uid, p.repo_id, p.directory
-                          FROM {versioncontrol_project_projects} p
-                           INNER JOIN {node} n ON p.nid = n.nid
-                          WHERE p.repo_id = %d AND p.directory = '%s'".
-                          ($include_unpublished ? '' : ' AND n.status = 1'),
-                          $repo_id, $current_path);
-
-      if ($project = db_fetch_object($result)) {
-        $comaintainers = _versioncontrol_project_get_comaintainers($project->nid);
-
-        $project_for_item = array(
-          'nid'             => $project->nid,
-          'owner_uid'       => $project->uid,
-          'repo_id'         => $project->repo_id,
-          'directory'       => $project->directory,
-          'maintainer_uids' => array_merge(
-            array($project->uid), $comaintainers
-          ),
-          'comaintainer_uids' => $comaintainers,
-        );
-      }
+      $matching_projects = versioncontrol_project_get_projects(
+        array('repo_ids' => array($repo_id), 'directories' => array($current_path)),
+        $include_unpublished
+      );
+      $project_for_item = empty($matching_projects)
+        ? NULL
+        : reset($matching_projects); // first (only) item
     }
     if (isset($project_for_item)) {
       foreach ($current_paths as $path) {
@@ -1179,35 +1291,134 @@ function versioncontrol_project_get_project_for_item($repository, $item, $includ
 }
 
 /**
- * Retrieve the projects that are associated to the affected items
- * in the given operation. If no projects can be associated to the
- * operation items, an empty array is returned.
- *
- * @param $operation
- *   The operation for which all associated projects should be retrieved.
- * @param $include_unpublished
- *   If FALSE (which is the default), this function does not return projects
- *   where the corresponding node is unpublished.
- *   If TRUE, all projects are returned, regardless of their status.
- *
- * @return
- *   A structured array containing the list of associated projects.
- *   The project node ids are the array keys, and the complete project arrays
- *   are given in the array values.
+ * Assign a project to a repository item, and also update the project/operation
+ * association table accordingly. VERSIONCONTROL_PROJECT_NID_NONE is also
+ * allowed as project nid, and denotes "no association". (This is important
+ * in order to distinguish between items without association vs. items that
+ * have not yet been processed, so that continuous database monitoring is
+ * not necessary.)
  */
-function versioncontrol_project_get_projects_for_operation($operation, $include_unpublished = FALSE) {
-  $projects = array();
-  $operation_items = versioncontrol_get_operation_items($operation);
+function _versioncontrol_project_add_project_for_item($item_revision_id, $project_nid) {
+  $association_exists = db_result(db_query(
+    'SELECT COUNT(*) FROM {versioncontrol_project_items}
+      WHERE item_revision_id = %d AND nid = %d',
+    $item_revision_id, $project_nid
+  ));
+  if ($association_exists) {
+    return; // Nothing to do.
+  }
 
-  foreach ($operation_items as $path => $item) {
-    $project = versioncontrol_project_get_project_for_item(
-      $operation['repository'], $item, $include_unpublished
-    );
-    if (isset($project)) {
-      $projects[$project['nid']] = $project;
+  // 0 ("no association") and actual project nodes are mutually exclusive.
+  if ($project_nid == VERSIONCONTROL_PROJECT_NID_NONE) {
+    db_query('DELETE FROM {versioncontrol_project_items}
+              WHERE item_revision_id = %d AND nid <> %d',
+              $item_revision_id, VERSIONCONTROL_PROJECT_NID_NONE);
+    $associations_removed = (db_affected_rows() != 0);
+  }
+  else {
+    db_query('DELETE FROM {versioncontrol_project_items}
+              WHERE item_revision_id = %d AND nid = %d',
+              $item_revision_id, VERSIONCONTROL_PROJECT_NID_NONE);
+    $associations_removed = FALSE;
+  }
+
+  db_query('INSERT INTO {versioncontrol_project_items} (item_revision_id, nid)
+            VALUES (%d, %d)', $item_revision_id, $project_nid);
+
+  // Look which operations contain this item, and modify the associations accordingly.
+  $result = db_query('SELECT vc_op_id FROM {versioncontrol_operation_items}
+                      WHERE item_revision_id = %d', $item_revision_id);
+
+  while ($vc_op_id = db_result($result)) {
+    if ($associations_removed) {
+      // Associations have been removed -> regenerate operation associations.
+      _versioncontrol_project_regenerate_operation_associations(array($vc_op_id));
+    }
+    else {
+      // No associations have been removed, just do a simple insert.
+      // Plus making sure not to write the same entry twice.
+      db_query('DELETE FROM {versioncontrol_project_operations}
+                WHERE vc_op_id = %d AND nid = %d', $vc_op_id, $project_nid);
+      db_query('INSERT INTO {versioncontrol_project_operations}
+                (vc_op_id, nid) VALUES (%d, %d)', $vc_op_id, $project_nid);
     }
   }
-  return $projects;
+}
+
+/**
+ * Remove a project/item association from the database, and regenerate any
+ * existing project/operation associations that included this item.
+ */
+function _versioncontrol_project_remove_item_association($item_revision_id, $project_nid) {
+  if ($project_nid == VERSIONCONTROL_PROJECT_NID_NONE) {
+    return array(); // Can't remove a "no association" entry.
+  }
+  // Fetch existing associations in order to regenerate related operations later.
+  $regenerated_vc_op_ids = array();
+
+  $result = db_query('
+    SELECT opitem.vc_op_id
+    FROM {versioncontrol_project_items} projitem
+      INNER JOIN {versioncontrol_operation_items} opitem
+        ON projitem.item_revision_id = opitem.item_revision_id
+    WHERE projitem.item_revision_id = %d and projitem.nid = %d',
+    $item_revision_id, $project_nid
+  );
+  while ($vc_op_id = db_result($result)) {
+    $regenerated_vc_op_ids[] = $vc_op_id;
+  }
+  db_query('DELETE FROM {versioncontrol_project_items}
+            WHERE item_revision_id = %d AND nid = %d',
+            $item_revision_id, $project_nid);
+
+  // An item that already had a project assigned won't go back to an unknown
+  // association state, instead it gets the 0 nid for "no association".
+  $count = db_result(db_query('
+    SELECT COUNT(*) FROM {versioncontrol_project_items}
+    WHERE item_revision_id = %d', $item_revision_id
+  ));
+  if (empty($count)) {
+    db_query('INSERT INTO {versioncontrol_project_items}
+              (item_revision_id, nid) VALUES (%d, %d)',
+              $item_revision_id, VERSIONCONTROL_PROJECT_NID_NONE);
+  }
+
+  _versioncontrol_project_regenerate_operation_associations($regenerated_vc_op_ids);
+}
+
+/**
+ * Regenerate the project/operation association cache for the given operations
+ * (an array of $operation['vc_op_id'] values) from scratch. To be called
+ * whenever a related operation item has a project/item association removed.
+ */
+function _versioncontrol_project_regenerate_operation_associations($vc_op_ids) {
+  if (empty($vc_op_ids)) {
+    return; // Nothing to do.
+  }
+
+  // Delete existing project/operation association cache.
+  $placeholders = array();
+  foreach ($vc_op_ids as $vc_op_id) {
+    $placeholders[] = '%d';
+  }
+  db_query('DELETE FROM {versioncontrol_project_operations}
+            WHERE vc_op_id IN ('. implode(',', $placeholders) .')', $vc_op_ids);
+
+  // Regenerate the associations from scratch.
+  foreach ($vc_op_ids as $vc_op_id) {
+    $result = db_query('
+      SELECT DISTINCT projitem.nid
+      FROM {versioncontrol_operation_items} opitem
+        INNER JOIN {versioncontrol_project_items} projitem
+          ON opitem.item_revision_id = projitem.item_revision_id
+      WHERE opitem.vc_op_id = %d AND projitem.nid <> %d',
+      $vc_op_id, VERSIONCONTROL_PROJECT_NID_NONE
+    );
+    while ($project_nid = db_result($result)) {
+      db_query('INSERT INTO {versioncontrol_project_operations}
+                (vc_op_id, nid) VALUES (%d, %d)', $vc_op_id, $project_nid);
+    }
+  }
 }
 
 
@@ -1249,9 +1460,16 @@ function versioncontrol_project_set_project($project) {
     $project['owner_uid'] = $node->uid;
   }
 
+  $existing_project = db_fetch_array(db_query(
+    'SELECT nid, repo_id, directory FROM {versioncontrol_project_projects}
+    WHERE nid = %d', $project['nid']
+  ));
+
   // If the entry already exists, delete it.
-  db_query('DELETE FROM {versioncontrol_project_projects}
-            WHERE nid = %d', $project['nid']);
+  if (!empty($existing_project)) {
+    db_query('DELETE FROM {versioncontrol_project_projects}
+              WHERE nid = %d', $project['nid']);
+  }
 
   db_query("INSERT INTO {versioncontrol_project_projects}
             (nid, repo_id, directory)
@@ -1281,6 +1499,21 @@ function versioncontrol_project_set_project($project) {
     $project['maintainer_uids'][] = $comaintainer_uid;
   }
 
+  // Add new project/item associations if a new project directory is given.
+  if (empty($existing_project) || $project['directory'] != $existing_project['directory']) {
+    $trailing_slash_directory = ($project['directory'] == '/')
+      ? $project['directory']
+      : $project['directory'] .'/';
+
+    $result = db_query("SELECT item_revision_id
+                        FROM {versioncontrol_item_revisions}
+                        WHERE path = '%s' OR path LIKE '%s%%'",
+                        $project['directory'], $trailing_slash_directory);
+    while ($item_revision_id = db_result($result)) {
+      _versioncontrol_project_add_project_for_item($item_revision_id, $project['nid']);
+    }
+  }
+
   // Insertion/update hooks, if any, will go here.
 
   return $project;
@@ -1307,6 +1540,10 @@ function versioncontrol_project_delete_project($nid) {
   db_query('DELETE FROM {versioncontrol_project_projects}
             WHERE nid = %d', $nid);
   db_query('DELETE FROM {versioncontrol_project_comaintainers}
+            WHERE nid = %d', $nid);
+  db_query('DELETE FROM {versioncontrol_project_items}
+            WHERE nid = %d', $nid);
+  db_query('DELETE FROM {versioncontrol_project_operations}
             WHERE nid = %d', $nid);
 }
 
@@ -1428,111 +1665,58 @@ function versioncontrol_project_versioncontrol_account($op, $uid, $username, $re
 
 
 /**
- * Retrieve statistics about projects from a set of commits.
- *
- * @param $constraints
- *   The constraints (as passed to versioncontrol_get_commit_operations()) that
- *   define which commits are taken into consideration for the statistics.
- * @param $limit
- *   If given, only the n most active projects (in terms of commits)
- *   will be included in the result.
- *
- * @return
- *   An array of information about the projects. Each element contains
- *   one project's statistics and consists of the following elements:
- *   - 'project': The project array, as returned
- *        by versioncontrol_project_get_project().
- *   - 'name': The title of the project node.
- *   - 'number_commits': The number of commits to this project
- *        (out of the given commits).
- *   - 'first_commit': The commit array of the first commit to this project
- *        (out of the given commits).
- *   - 'last_commit': The commit array of the last commit to this project
- *        (out of the given commits).
- *
- *   The array is sorted in descending order of the commit count,
- *   in other words, the first item corresponds to the most active project.
- *   If no commits matching the given constraints can be found or no projects
- *   were affected by this set of commits, an empty array is returned.
+ * Act on database changes when commit, tag or branch operations are inserted
+ * or deleted. Note that this hook is not necessarily called at the time
+ * when the operation actually happens - operations can also be inserted
+ * by a cron script when the actual commit/branch/tag has been accomplished
+ * for quite a while already.
  */
-function versioncontrol_project_get_statistics($constraints, $limit = NULL) {
-  $projects = array();
-  $project_nids = array();
-  $first_commits = array();
-  $last_commits = array();
-
-  $commit_operations = versioncontrol_get_commit_operations($constraints);
-
-  // Find out which projects are affected, and how active they have been.
-  foreach ($commit_operations as $commit_op) {
-    $op_projects = versioncontrol_project_get_projects_for_operation($commit_op);
-    foreach ($op_projects as $nid => $project) {
-      $projects[$nid] = $project;
-      $project_nids[] = $nid;
-
-      // Write the first commit for each iteration, the last one encountered is
-      // the first one in time. ($commit_ops is sorted reverse chronologically.)
-      $first_commits[$nid] = $commit_op;
-
-      // Similar for the last commit which is the first one that we get to see.
-      if (!isset($last_commits[$nid])) {
-        $last_commits[$nid] = $commit_op;
+function versioncontrol_project_versioncontrol_operation($op, $operation, $operation_items) {
+  switch ($op) {
+    case 'insert':
+      // Update the project/item associations with the new operation items.
+      foreach ($operation_items as $path => $item) {
+        $project = versioncontrol_project_get_project_for_item(
+          $operation['repository'], $item, TRUE
+        );
+        _versioncontrol_project_add_project_for_item($item['item_revision_id'],
+          (empty($project) ? VERSIONCONTROL_PROJECT_NID_NONE : $project['nid'])
+        );
       }
-    }
-  }
-
-  // Sort by commit count.
-  $commit_counts = array_count_values($project_nids);
-  arsort($commit_counts);
-
-  // Sort by commit count, and if requested by the caller,
-  // limit the output to the n most active projects.
-  $limited_commit_counts = array();
-  $i = 0;
-  foreach ($commit_counts as $nid => $count) {
-    if (isset($limit) && $i >= $limit) {
       break;
-    }
-    $limited_commit_counts[$nid] = $count;
-    ++$i;
-  }
-  $commit_counts = $limited_commit_counts;
-  $project_nids = array_unique(array_keys($limited_commit_counts));
 
-  // No projects in the result, so we can return right now.
-  if (empty($project_nids)) {
-    return array();
+    case 'delete':
+      db_query('DELETE FROM {versioncontrol_project_operations}
+                WHERE vc_op_id = %d', $operation['vc_op_id']);
+      break;
   }
+}
 
-  // Ok, now construct a query and get the desired node titles
-  $placeholders = array();
-  foreach ($project_nids as $nid) {
-    $placeholders[] = '%d';
-  }
-  $result = db_query('SELECT nid, title FROM {node}
-                      WHERE nid IN ('. implode(',', $placeholders) .')',
-                      $project_nids);
-  $statistics = array();
 
-  while ($node = db_fetch_object($result)) {
-    $statistics[$node->nid] = array(
-      'project' => $projects[$node->nid],
-      'name' => $node->title,
-      'number_commits' => $commit_counts[$node->nid],
-      'first_commit' => $first_commits[$node->nid],
-      'last_commit' => $last_commits[$node->nid],
-    );
-  }
+/**
+ * Act on database changes when VCS repositories are inserted,
+ * updated or deleted.
+ */
+function versioncontrol_project_versioncontrol_repository($op, $repository) {
+  switch ($op) {
+    case 'delete':
+      // Delete item revisions and related source item entries.
+      $result = db_query('SELECT item_revision_id
+                          FROM {versioncontrol_item_revisions}
+                          WHERE repo_id = %d', $repository['repo_id']);
+      $item_revision_ids = array();
+      $placeholders = array();
 
-  if (empty($statistics)) {
-    return array();
+      while ($item_revision_id = db_result($result)) {
+        $item_revision_ids[] = $item_revision_id;
+        $placeholders[] = '%d';
+      }
+      if (!empty($item_ids)) {
+        $placeholders = implode(',', $placeholders);
+        db_query('DELETE FROM {versioncontrol_project_items}
+                  WHERE item_revision_id IN ('. $placeholders .')',
+                  $item_revision_ids);
+      }
+      break;
   }
-
-  $sorted_statistics = array();
-  foreach ($project_nids as $nid) { // the $project_nids array is already in the right order
-    if (isset($statistics[$nid])) {
-      $sorted_statistics[] = $statistics[$nid];
-    }
-  }
-  return $sorted_statistics;
 }
