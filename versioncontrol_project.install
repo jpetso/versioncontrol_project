@@ -121,6 +121,31 @@ function versioncontrol_project_install() {
 }
 
 /**
+ * Implementation of hook_enable().
+ */
+function versioncontrol_project_enable() {
+  require_once(drupal_get_path('module', 'versioncontrol_project') .'/versioncontrol_project.module');
+
+  // Check to make sure all existing projects are entered in the
+  // {versioncontrol_project_projects} table, and add if not.
+  $vc_projects = array();
+  $projects = array();
+  $current_vc_projects = db_query("SELECT nid FROM {versioncontrol_project_projects}");
+  while ($vc_project = db_fetch_object($current_vc_projects)) {
+    $vc_projects[] = $vc_project->nid;
+  }
+  $projects = db_query("SELECT nid FROM {node} WHERE type = 'project_project'");
+  while ($project = db_fetch_array($projects)) {
+    if (!in_array($project['nid'], $vc_projects)) {
+      $project['repo_id'] = 0;
+      versioncontrol_project_set_project($project);
+    }
+  }
+
+  _versioncontrol_project_write_missing_item_associations();
+}
+
+/**
  * Implementation of hook_uninstall().
  */
 function versioncontrol_project_uninstall() {

@@ -27,29 +27,6 @@ function versioncontrol_project_boot() {
 }
 
 /**
- * Implementation of hook_enable().
- */
-function versioncontrol_project_enable() {
-  // Check to make sure all existing projects are entered in the
-  // {versioncontrol_project_projects} table, and add if not.
-  $vc_projects = array();
-  $projects = array();
-  $current_vc_projects = db_query("SELECT nid FROM {versioncontrol_project_projects}");
-  while ($vc_project = db_fetch_object($current_vc_projects)) {
-    $vc_projects[] = $vc_project->nid;
-  }
-  $projects = db_query("SELECT nid FROM {node} WHERE type = 'project_project'");
-  while ($project = db_fetch_array($projects)) {
-    if (!in_array($project['nid'], $vc_projects)) {
-      $project['repo_id'] = 0;
-      versioncontrol_project_set_project($project);
-    }
-  }
-
-  _versioncontrol_project_write_missing_item_associations();
-}
-
-/**
  * Check if any project/item associations have been missed, and if so,
  * determine their status and write it to the database.
  */
@@ -67,7 +44,7 @@ function _versioncontrol_project_write_missing_item_associations() {
     $project = versioncontrol_project_get_project_for_item(
       $item->repo_id, $item->path, TRUE // include unpublished projects
     );
-    _versioncontrol_project_add_project_for_item($item->item_revision_id,
+    _versioncontrol_project_add_item_association($item->item_revision_id,
       (empty($project) ? VERSIONCONTROL_PROJECT_NID_NONE : $project['nid'])
     );
   }
@@ -728,7 +705,7 @@ function versioncontrol_project_commitlog($node) {
   if ($node->type == 'project_project') {
     project_project_set_breadcrumb($node, array(l($title, 'node/'. $node->nid)));
   }
-  return commitlog_operations(array('nids' => array($node->nid)));
+  return commitlog_operations_page(array('nids' => array($node->nid)));
 }
 
 /**
@@ -851,6 +828,17 @@ function versioncontrol_project_commitlog_constraints() {
 }
 
 /**
+ * Implementation of hook_versioncontrol_operation_constraint_info().
+ * This module adds the native operation constraint 'nids', which filters
+ * by the nid of project nodes associated to the operations.
+ */
+function versioncontrol_project_versioncontrol_operation_constraint_info() {
+  return array(
+    'nids' => array(),
+  );
+}
+
+/**
  * Implementation of versioncontrol_alter_operation_constraints():
  * Return a modified version of the given operation constraints that includes
  * the given project specific constraints in a way that the Version Control API
@@ -867,58 +855,37 @@ function versioncontrol_project_commitlog_constraints() {
  *        will only contain operations that correspond to one of the projects
  *        that any of the specified users maintain.
  */
-// TODO: alter the versioncontrol_get_operations() SQL query instead of just
-//       altering the constraints array.
-function versioncontrol_project_alter_operation_constraints(&$constraints) {
+function versioncontrol_project_versioncontrol_operation_constraints_alter(&$constraints) {
   if (isset($constraints['maintainer_uids'])) {
     $projects = versioncontrol_project_get_projects(array(
       'maintainer_uids' => $constraints['maintainer_uids'],
     ), TRUE);
-
-    $paths = array();
-    $repo_ids = array();
+    $constraints['nids'] = array();
 
     foreach ($projects as $nid => $project) {
-      $paths[] = $project['directory'];
-      $repo_ids[] = $project['repo_id'];
+      $constraints['nids'][] = $nid;
     }
-
-    // In case the caller has also passed a 'paths' constraint, intersect this
-    // with the paths determined by the 'maintainer_uid' constraint
-    // so that there is a real 'AND' condition.
-    $constraints['paths'] = isset($constraints['paths'])
-                            ? array_intersect($paths, $constraints['paths'])
-                            : $paths;
-    $constraints['repo_ids'] = isset($constraints['repo_ids'])
-                                ? array_intersect($repo_ids, $constraints['repo_ids'])
-                                : $repo_ids;
     unset($constraints['maintainer_uids']);
   }
+}
 
-  if (isset($constraints['nids'])) {
-    $projects = versioncontrol_project_get_projects(array(
-      'nids' => $constraints['nids'],
-    ), TRUE);
-
-    $paths = array();
-    $repo_ids = array();
-
-    foreach ($projects as $nid => $project) {
-      $paths[] = $project['directory'];
-      $repo_ids[] = $project['repo_id'];
-    }
-
-    // In case the caller has also passed a 'paths' constraint, intersect this
-    // with the paths determined by the 'nids' constraint so that there is
-    // a real 'AND' condition.
-    $constraints['paths'] = isset($constraints['paths'])
-                            ? array_intersect($paths, $constraints['paths'])
-                            : $paths;
-    $constraints['repo_ids'] = isset($constraints['repo_ids'])
-                                ? array_intersect($repo_ids, $constraints['repo_ids'])
-                                : $repo_ids;
-    unset($constraints['nids']);
+/**
+ * Filter operations by associated project nodes.
+ */
+function versioncontrol_project_operation_constraint_nids($constraint, &$tables, &$and_constraints, &$params) {
+  $placeholders = array();
+  foreach ($constraint as $nid) {
+    $placeholders[] = '%d';
+    $params[] = $nid;
   }
+  if (!isset($tables['versioncontrol_project_operations'])) {
+    $tables['versioncontrol_project_operations'] = array(
+      'alias' => 'projop',
+      'join_on' => $tables['versioncontrol_operations']['alias'] .'.vc_op_id = projop.vc_op_id',
+    );
+  }
+  $and_constraints[] = $tables['versioncontrol_project_operations']['alias'] .'.nid
+                        IN ('. implode(',', $placeholders) .')';
 }
 
 
@@ -1161,6 +1128,10 @@ function versioncontrol_project_get_projects($constraints = array(), $include_un
 
   $projects = array();
   while ($project = db_fetch_object($result)) {
+    if (isset($project_cache[$project->nid])) {
+      $projects[$project->nid] = $project_cache[$project->nid];
+      continue;
+    }
     $comaintainers = _versioncontrol_project_get_comaintainers($project->nid);
 
     $projects[$project->nid] = array(
@@ -1173,8 +1144,11 @@ function versioncontrol_project_get_projects($constraints = array(), $include_un
       ),
       'comaintainer_uids' => $comaintainers,
     );
+    // Cache single projects by nid.
+    $project_cache[$project->nid] = $projects[$project->nid];
   }
-  $project_cache[$constraints_serialized] = $projects; // cache the results
+  // Cache whole query results by the serialized query.
+  $project_cache[$constraints_serialized] = $projects;
   return $projects;
 }
 
@@ -1298,7 +1272,7 @@ function versioncontrol_project_get_project_for_item($repository, $item, $includ
  * have not yet been processed, so that continuous database monitoring is
  * not necessary.)
  */
-function _versioncontrol_project_add_project_for_item($item_revision_id, $project_nid) {
+function _versioncontrol_project_add_item_association($item_revision_id, $project_nid) {
   $association_exists = db_result(db_query(
     'SELECT COUNT(*) FROM {versioncontrol_project_items}
       WHERE item_revision_id = %d AND nid = %d',
@@ -1505,12 +1479,14 @@ function versioncontrol_project_set_project($project) {
       ? $project['directory']
       : $project['directory'] .'/';
 
-    $result = db_query("SELECT item_revision_id
-                        FROM {versioncontrol_item_revisions}
-                        WHERE path = '%s' OR path LIKE '%s%%'",
-                        $project['directory'], $trailing_slash_directory);
+    $result = db_query("
+      SELECT item_revision_id
+      FROM {versioncontrol_item_revisions}
+      WHERE repo_id = %d AND (path = '%s' OR path LIKE '%s%%')",
+      $project['repo_id'], $project['directory'], $trailing_slash_directory
+    );
     while ($item_revision_id = db_result($result)) {
-      _versioncontrol_project_add_project_for_item($item_revision_id, $project['nid']);
+      _versioncontrol_project_add_item_association($item_revision_id, $project['nid']);
     }
   }
 
@@ -1679,7 +1655,7 @@ function versioncontrol_project_versioncontrol_operation($op, $operation, $opera
         $project = versioncontrol_project_get_project_for_item(
           $operation['repository'], $item, TRUE
         );
-        _versioncontrol_project_add_project_for_item($item['item_revision_id'],
+        _versioncontrol_project_add_item_association($item['item_revision_id'],
           (empty($project) ? VERSIONCONTROL_PROJECT_NID_NONE : $project['nid'])
         );
       }
