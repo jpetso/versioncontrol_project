@@ -1279,7 +1279,20 @@ function _versioncontrol_project_add_item_association($item_revision_id, $projec
     $item_revision_id, $project_nid
   ));
   if ($association_exists) {
-    return; // Nothing to do.
+    // The item entry exists already, just make sure that new operations
+    // (e.g. branch/tag operations which use existing items) also get the
+    // project properly associated.
+    $result = db_query('SELECT opitem.vc_op_id
+                        FROM {versioncontrol_operation_items} opitem
+                          LEFT JOIN {versioncontrol_project_operations} projop
+                            ON opitem.vc_op_id = projop.vc_op_id
+                        WHERE opitem.item_revision_id = %d
+                          AND projop.vc_op_id IS NULL', $item_revision_id);
+    while ($vc_op_id = db_result($result)) {
+      db_query('INSERT INTO {versioncontrol_project_operations}
+                (vc_op_id, nid) VALUES (%d, %d)', $vc_op_id, $project_nid);
+    }
+    return;
   }
 
   // 0 ("no association") and actual project nodes are mutually exclusive.
