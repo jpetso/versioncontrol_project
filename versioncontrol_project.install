@@ -2,7 +2,7 @@
 // $Id$
 /**
  * @file
- * Version Control / Project Node Integration - Integrates project nodes
+ * Version Control / Project Node integration - Integrates project nodes
  * (provided by the Project module) with version control systems supported
  * by the Version Control API.
  *

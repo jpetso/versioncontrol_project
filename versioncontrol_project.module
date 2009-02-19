@@ -2,11 +2,11 @@
 // $Id$
 /**
  * @file
- * Version Control / Project Node Integration - Integrates project nodes
+ * Version Control / Project Node integration - Integrates project nodes
  * (provided by the Project module) with version control systems supported
  * by the Version Control API.
  *
- * Copyright 2006, 2007 Derek Wright ("dww" , http://drupal.org/user/46549)
+ * Copyright 2006, 2007 Derek Wright ("dww", http://drupal.org/user/46549)
  * Copyright 2007, 2008, 2009 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
 
@@ -154,15 +154,15 @@ function versioncontrol_project_commit_access_edit_access($project_node, $accoun
  * Implementation of project.module's hook_project_page_link_alter():
  * Add a link to the project's commit log to the resources section.
  */
-function versioncontrol_project_project_page_link_alter($node, &$all_links) {
+function versioncontrol_project_project_page_link_alter(&$links, $node) {
   if (isset($node->versioncontrol_project) && $node->versioncontrol_project['repo_id'] > 0) {
-    $all_links['development']['links']['view_commitlog'] = l(t('View commit messages'), 'node/'. $node->nid .'/commitlog');
+    $links['development']['links']['view_commitlog'] = l(t('View commit messages'), 'node/'. $node->nid .'/commitlog');
   }
 }
 
 
 /**
- * Form callback for 'admin/project/versioncontrol-project':
+ * Form callback for 'admin/project/versioncontrol-settings/project':
  * Global settings for this module.
  */
 function versioncontrol_project_admin_form(&$form_state) {

@@ -1,5 +1,5 @@
 ; $Id$
-name = "Version Control / Project Node Integration"
+name = "Version Control / Project Node integration"
 description = "Integrates project nodes (provided by the Project module) with version control systems supported by the Version Control API."
 dependencies[] = versioncontrol
 dependencies[] = project
