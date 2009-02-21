@@ -1,0 +1,7 @@
+; $Id$
+name = "Version Control / Release Node integration"
+description = "Integrates release nodes (provided by the 'Project releases' module) with version control systems supported by the Version Control API, in cooperation with the Version Control / Project Node integration module."
+dependencies[] = versioncontrol_project
+dependencies[] = project_release
+package = Version Control
+core = 6.x

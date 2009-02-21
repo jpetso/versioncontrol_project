@@ -1,0 +1,75 @@
+<?php
+// $Id$
+/**
+ * @file
+ * Version Control / Release Node integration - Integrates release nodes
+ * (provided by the "Project releases" module) with version control systems
+ * supported by the Version Control API, in cooperation with the
+ * Version Control / Project Node integration module.
+ *
+ * Copyright 2009 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
+ */
+
+/**
+ * Implementation of hook_schema().
+ */
+function versioncontrol_release_schema() {
+  $schema['versioncontrol_release_labels'] = array(
+    'description' => 'This table associates release labels (from the {versioncontrol_labels} table) with release and project nodes. An entry in this table means that the release has been (or will be) generated from the associated label.',
+    'fields' => array(
+      'release_nid' => array(
+        'description' => 'The {node}.nid identifier of the release node.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'label_id' => array(
+        'description' => 'The {versioncontrol_labels}.label_id of the release label.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'project_nid' => array(
+        'description' => 'The {node}.nid identifier of the project node.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'unique keys' => array(
+      // It's not possible to have multiple releases from the same label in
+      // the same project.
+      'label_id_project_nid' => array('label_id', 'project_nid'),
+    ),
+    'primary key' => array('release_nid'),
+  );
+  return $schema;
+}
+
+/**
+ * Implementation of hook_install().
+ */
+function versioncontrol_release_install() {
+  // Create tables.
+  drupal_install_schema('versioncontrol_release');
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function versioncontrol_release_uninstall() {
+  // Remove variables.
+  $variables = array(
+    'versioncontrol_release_message_new_release_branch',
+    'versioncontrol_release_message_new_release_tag',
+  );
+  foreach ($variables as $variable) {
+    variable_del($variable);
+  }
+
+  // Remove tables.
+  drupal_uninstall_schema('versioncontrol_release');
+}
