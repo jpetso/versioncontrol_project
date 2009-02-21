@@ -534,6 +534,23 @@ function versioncontrol_release_nodeapi(&$node, $op, $arg = NULL) {
         }
         return;
 
+      case 'view':
+        if (!empty($node->versioncontrol_release)) {
+          $label = $node->versioncontrol_release['label'];
+
+          if ($label['type'] == VERSIONCONTROL_OPERATION_BRANCH) {
+            $output = t('Nightly development snapshot from branch: @branch', array('@branch' => $label['name']));
+          }
+          else {
+            $output = t('Official release from tag: @tag', array('@tag' => $label['name']));
+          }
+          $node->content['versioncontrol_release'] = array(
+            '#value' => '<small>' . $output . '</small><br/>',
+            '#weight' => -3,
+          );
+        }
+        return;
+
       case 'update':
         if (isset($node->versioncontrol_release_label_id)) {
           versioncontrol_release_delete_release_label($node->nid);
