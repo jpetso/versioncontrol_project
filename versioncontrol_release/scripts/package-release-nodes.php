@@ -95,8 +95,6 @@ umask(0022);
 
 require_once 'includes/bootstrap.inc';
 drupal_bootstrap(DRUPAL_BOOTSTRAP_FULL);
-// We have to initialize the theme() system before we leave $drupal_root
-$hack = theme('placeholder', 'hack');
 
 if ($task == 'check' || $task == 'repair') {
   verify_packages($task, $project_id);
