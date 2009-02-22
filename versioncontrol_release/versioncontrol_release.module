@@ -7,7 +7,7 @@
  * supported by the Version Control API, in cooperation with the
  * Version Control / Project Node integration module.
  *
- * Copyright 2006, 2007, 2008, 2009 Derek Wright ("dww", http://drupal.org/user/46549)
+ * Copyright 2006, 2007, 2008, 2009 by Derek Wright ("dww", http://drupal.org/user/46549)
  * Copyright 2009 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
 
@@ -497,6 +497,10 @@ function versioncontrol_release_project_release_form_alter_add_node_form(&$form,
     $form['rel_id']['#access'] = FALSE; // rel_id is for "release identification"
     //$form['#pre_render'][] = 'versioncontrol_project_release_form_pre_render';
 
+    // For the actual submit button, add a handler to clear out
+    // $form_state['storage'] entirely so that we actually submit the form.
+    $form['buttons']['submit']['#submit'][] = 'versioncontrol_release_form_add_final_submit';
+
     array_unshift($form['#validate'], 'versioncontrol_release_form_add_validate');
   }
 
@@ -516,6 +520,19 @@ function versioncontrol_release_form_add_validate($form, &$form_state) {
     $form_state['values']['project_release'],
     $form['#versioncontrol_release_version']
   );
+}
+
+/**
+ * Submit handler for the "Save" button on the release node form.
+ *
+ * This handler is invoke when the release node is finally being saved, and
+ * unsets the $form_state['storage'] values that have been set in
+ * versioncontrol_release_form_next_submit(), so that the form will be
+ * submitted instead of being rebuilt.
+ */
+function versioncontrol_release_form_add_final_submit($form, &$form_state) {
+  unset($form_state['storage']['versioncontrol_release_label_id']);
+  unset($form_state['storage']['project_release']);
 }
 
 /**
@@ -567,6 +584,18 @@ function versioncontrol_release_nodeapi(&$node, $op, $arg = NULL) {
           );
           unset($node->versioncontrol_release_label_id);
           $node->versioncontrol_release = array('label' => $label);
+
+          if ($op == 'insert') { // and not 'update'
+            // Show the admin-defined insertion message to the user.
+            $msg_variable = ($label['type'] == VERSIONCONTROL_OPERATION_TAG)
+              ? 'versioncontrol_release_message_new_release_branch'
+              : 'versioncontrol_release_message_new_release_tag';
+            $msg = variable_get($msg_variable, '');
+
+            if (!empty($msg)) {
+              drupal_set_message($msg);
+            }
+          }
         }
         return;
 
