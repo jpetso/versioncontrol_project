@@ -194,7 +194,6 @@ function package_releases($type, $project_id) {
       continue;
     }
     $repository = reset($repositories); // first item
-    putenv('CVSROOT=' . escapeshellcmd($repository['root']));
 
     $wd_err_msg = array();
     $version = $release->version;
@@ -264,7 +263,7 @@ function package_release($release_nid, $project, $repository, $version, $rev) {
 
   ///TODO: drupal.org specific hack, get rid of it somehow
   $is_core = ($repository['repo_id'] == 1 && $uri == 'drupal');
-  $is_contrib = ($repository['repo_id'] == 2 && !$is_core);
+  $is_contrib = ($repository['repo_id'] == 2);
 
   $id = $uri . '-' . $version;
   $view_link = l(t('view'), 'node/' . $release_nid);
@@ -290,6 +289,7 @@ function package_release($release_nid, $project, $repository, $version, $rev) {
     return FALSE;
   }
   // Checkout this release from CVS, and see if we need to rebuild it.
+  putenv('CVSROOT=' . escapeshellcmd($repository['root']));
   if (!drupal_exec("$cvs -q export $rev -d . $relative_project_dir")) {
     return FALSE;
   }
