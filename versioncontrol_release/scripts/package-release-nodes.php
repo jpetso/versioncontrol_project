@@ -20,88 +20,39 @@
  * - correctly handle N files per release, package to .zip and .tgz, etc.
  */
 
-// ------------------------------------------------------------
-// Required customization
-// ------------------------------------------------------------
-
-// The root of your Drupal installation, so we can properly bootstrap
-// Drupal. This should be the full path to the directory that holds
-// your index.php file, the "includes" subdirectory, etc.
-$drupal_root = '';
-
-// The name of your site. Required so that when we bootstrap Drupal in
-// this script, we find the right settings.php file in your sites folder.
-// For example, on drupal.org:
-// $site_name = 'drupal.org';
-$site_name = '';
-
-// Root of the temporary directory where you want packages to be
-// made. Subdirectories will be created depending on the task.
-$tmp_root = '';
-
-// Location of the LICENSE.txt file you want included in all packages.
-$license = '';
-
-// Location of the INSTALL.txt file you want included in all
-// translation packages.
-$trans_install = ''; ///TODO (jpetso): unused?
-
-
-// ------------------------------------------------------------
-// Optional customization
-// ------------------------------------------------------------
-
-// ----------------
-// File destination
-// ----------------
-// This assumes you want to install the packaged releases in the
-// "files/projects" directory of your root Drupal installation. If
-// that's not the case, you should customize these.
-$dest_root = $drupal_root;
-$dest_rel = 'files/projects';
-
-// --------------
-// External tools
-// --------------
-// If you want this program to always use absolute paths for all the
-// tools it invokes, provide a full path for each one. Otherwise,
-// the script will find these tools in your PATH.
-$tar = '/usr/bin/tar';
-$gzip = '/usr/bin/gzip';
-$cvs = '/usr/bin/cvs';
-$ln = '/bin/ln';
-$rm = '/bin/rm';
-$msgcat = 'msgcat';
-$msgattrib = 'msgattrib';
-$msgfmt = 'msgfmt';
-
-// The taxonomy id (tid) of the "Security update" term on drupal.org
-define('SECURITY_UPDATE_TID', 100);
+require_once(dirname(__FILE__) . '/package-release-nodes.config.inc');
 
 // ------------------------------------------------------------
 // Initialization
 // (Real work begins here, nothing else to customize)
 // ------------------------------------------------------------
 
-// Check if all required variables are defined
+// Make sure we've got canonical paths, as we will chdir into $drupal_root.
+$drupal_root = realpath($drupal_root);
+$dest_root = realpath($dest_root);
+$tmp_root = realpath($tmp_root);
+$license = realpath($license);
+$trans_install = realpath($trans_install);
+$dest_root = realpath($dest_root);
+
+// Check if all required variables are defined.
 $vars = array(
-  'drupal_root' => realpath($drupal_root),
+  'drupal_root' => $drupal_root,
+  'dest_root' => $dest_root,
   'site_name' => $site_name,
-  'tmp_root' => realpath($tmp_root),
-  'license' => realpath($license),
-  'trans_install' => realpath($trans_install),
+  'tmp_root' => $tmp_root,
+  'license' => $license,
+  'trans_install' => $trans_install, ///TODO (jpetso): unused?
 );
 foreach ($vars as $name => $val) {
   if (empty($val)) {
-    print "ERROR: \"\$$name\" variable not set, aborting\n";
+    fwrite(STDERR, "ERROR: \"\$$name\" variable not set, aborting\n");
     $fatal_err = TRUE;
   }
 }
 if ($fatal_err) {
   exit(1);
 }
-
-$dest_root = realpath($dest_root);
 
 $script_name = $argv[0];
 
@@ -119,7 +70,7 @@ switch($task) {
   case 'repair':
     break;
   default:
-    print "ERROR: $argv[0] invoked with invalid argument: \"$task\"\n";
+    fwrite(STDERR, "ERROR: $argv[0] invoked with invalid argument: \"$task\"\n");
     exit (1);
 }
 
@@ -134,7 +85,7 @@ $_SERVER['SCRIPT_FILENAME'] = $_SERVER['PWD'] . '/' . $script_name;
 $_SERVER['PATH_TRANSLATED'] = $_SERVER['SCRIPT_FILENAME'];
 
 if (!chdir($drupal_root)) {
-  print "ERROR: Can't chdir($drupal_root): aborting.\n";
+  fwrite(STDERR, "ERROR: Can't chdir($drupal_root): aborting.\n");
   exit(1);
 }
 
@@ -181,9 +132,8 @@ function package_releases($type, $project_id) {
   }
   elseif ($type == 'branch') {
     $rel_node_join = " INNER JOIN {node} nr ON prn.nid = nr.nid";
-    $where = " AND (label.type = %d) AND ((f.filepath IS NULL) OR (f.filepath = '') OR (nr.status = %d))";
+    $where = " AND (label.type = %d) AND ((f.filepath IS NULL) OR (f.filepath = '') OR (nr.status = 1))";
     $where_args[] = VERSIONCONTROL_OPERATION_BRANCH;  // label.type
-    $where_args[] = 1;  // nr.status
     $plural = t('branches');
     if (empty($project_id)) {
       wd_msg("Starting to package all snapshot releases.");
@@ -197,8 +147,6 @@ function package_releases($type, $project_id) {
     return;
   }
   $args = array();
-  $args[] = 1;    // Account for node.status = 1.
-  $args[] = 1;    // Account for prp.releases = 1.
   $args[] = (int) _project_release_get_api_vid();
   if (!empty($project_id)) {
     $where .= ' AND prn.pid = %d';
@@ -206,7 +154,7 @@ function package_releases($type, $project_id) {
   }
   $args = array_merge($args, $where_args);
 
-  $query = db_query("
+  $result = db_query("
     SELECT pp.uri, prn.nid AS release_nid, prn.pid AS project_nid, prn.version,
       prn.version_major, td.tid, vpp.directory, vpp.repo_id,
       label.label_id, label.name AS label_name, label.type AS label_type
@@ -222,7 +170,7 @@ function package_releases($type, $project_id) {
       INNER JOIN {versioncontrol_project_projects} vpp ON prn.pid = vpp.nid
       INNER JOIN {versioncontrol_release_labels} vrl ON prn.nid = vrl.release_nid
       INNER JOIN {versioncontrol_labels} label ON vrl.label_id = label.label_id
-    WHERE np.status = %d AND prp.releases = %d AND td.vid = %d
+    WHERE np.status = 1 AND prp.releases = 1 AND td.vid = %d
       $where
     ORDER BY pp.uri", $args
   );
@@ -234,7 +182,7 @@ function package_releases($type, $project_id) {
   // Read everything out of the query immediately so that we don't leave the
   // query object/connection open while doing other queries.
   $releases = array();
-  while ($release = db_fetch_object($query)) {
+  while ($release = db_fetch_object($result)) {
     $releases[] = $release;
   }
   foreach ($releases as $release) {
@@ -308,8 +256,8 @@ function package_releases($type, $project_id) {
 }
 
 function package_release($release_nid, $project, $repository, $version, $rev) {
-  global $tmp_dir, $dest_root, $dest_rel;
-  global $cvs, $tar, $gzip, $rm, $ln;
+  global $tmp_dir, $drupal_root, $dest_root, $dest_rel;
+  global $cvs, $tar, $gzip, $rm, $ln, $mkdir;
   global $license, $trans_install;
 
   // In Version Control API, item paths start with a slash. Remove that for CVS.
@@ -335,10 +283,20 @@ function package_release($release_nid, $project, $repository, $version, $rev) {
   // Don't use drupal_exec() or return if this fails, we expect it to be empty.
   exec("$rm -rf $export_dir");
 
-  // Checkout this release from CVS, and see if we need to rebuild it.
-  if (!drupal_exec("$cvs -q export $rev -d $export_dir $relative_project_dir")) {
+  // Create the target directory and chdir() to it, because "cvs export" can't
+  // take absolute export directory paths as argument.
+  if (!drupal_exec("$mkdir -p $export_dir")) {
     return FALSE;
   }
+  if (!drupal_chdir($export_dir)) {
+    return FALSE;
+  }
+  // Checkout this release from CVS, and see if we need to rebuild it.
+  if (!drupal_exec("$cvs -q export $rev -d . $relative_project_dir")) {
+    return FALSE;
+  }
+  drupal_chdir($drupal_root);
+
   if (!is_dir($export_dir)) {
     wd_err("ERROR: %dir does not exist after cvs export %rev", array(
       '%dir' => $export_dir,
@@ -551,7 +509,7 @@ function verify_packages($task, $project_id) {
     $where = ' AND prn.pid = %d';
     $args[] = $project_id;
   }
-  $query = db_query("
+  $result = db_query("
     SELECT prn.nid, f.filepath, f.timestamp, prf.filehash
     FROM {project_release_nodes} prn
       INNER JOIN {node} n ON prn.nid = n.nid
@@ -559,7 +517,7 @@ function verify_packages($task, $project_id) {
       INNER JOIN {files} f ON prf.fid = f.fid
     WHERE n.status = %d AND f.filepath <> ''" . $where, $args
   );
-  while ($release = db_fetch_object($query)) {
+  while ($release = db_fetch_object($result)) {
     // Grab all the results into RAM to free up the DB connection for
     // when we need to update the DB to correct metadata or log messages.
     $releases[] = $release;
@@ -693,6 +651,19 @@ function drupal_exec($cmd) {
   return TRUE;
 }
 
+/**
+ * Wrapper for chdir() that logs errors to the watchdog.
+ * @param $dir Directory to change into.
+ * @return TRUE if the command was successful (0 exit status), FALSE otherwise.
+ */
+function drupal_chdir($dir) {
+  if (!chdir($dir)) {
+    wd_err("ERROR: Can't chdir('@dir')", array('@dir' => $dir));
+    return FALSE;
+  }
+  return TRUE;
+}
+
 /// TODO: remove this before the final script goes live -- debugging only.
 function wprint($var) {
   watchdog('package_debug', '<pre>' . var_export($var, TRUE));
@@ -705,7 +676,7 @@ function wprint($var) {
 function wd_msg($msg, $variables = array(), $link = NULL) {
   global $task;
   watchdog('package_' . $task, $msg, $variables, WATCHDOG_NOTICE, $link);
-  echo $msg ."\n";
+  fwrite(STDERR, strtr($msg, $variables) ."\n");
 }
 
 /**
@@ -717,8 +688,8 @@ function wd_err($msg, $variables = array(), $link = NULL) {
     $wd_err_msg = array();
   }
   watchdog('package_error', $msg, $variables, WATCHDOG_ERROR, $link);
-  echo t($msg, $variables) ."\n";
-  $wd_err_msg[] = t($msg, $variables);
+  fwrite(STDERR, strtr($msg, $variables) ."\n");
+  $wd_err_msg[] = strtr($msg, $variables);
 }
 
 /**
@@ -727,7 +698,7 @@ function wd_err($msg, $variables = array(), $link = NULL) {
  */
 function wd_check($msg, $variables = array(), $link = NULL) {
   watchdog('package_check', $msg, $variables, WATCHDOG_NOTICE, $link);
-  echo $msg ."\n";
+  fwrite(STDERR, strtr($msg, $variables) ."\n");
 }
 
 /**
