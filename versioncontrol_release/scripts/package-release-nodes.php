@@ -84,6 +84,11 @@ $_SERVER['PHP_SELF'] = '/' . $script_name;
 $_SERVER['SCRIPT_FILENAME'] = $_SERVER['PWD'] . '/' . $script_name;
 $_SERVER['PATH_TRANSLATED'] = $_SERVER['SCRIPT_FILENAME'];
 
+// Set a variable so that on sites using DB replication, we ensure that all
+// our queries are against the primary database to avoid problems where the
+// connection to a secondary DB might timeout causing node_load() to fail.
+$_SESSION['not_slavesafe'] = TRUE;
+
 if (!chdir($drupal_root)) {
   fwrite(STDERR, "ERROR: Can't chdir($drupal_root): aborting.\n");
   exit(1);
@@ -805,7 +810,22 @@ function package_release_update_node($nid, $file_path) {
     return;
   }
 
-  db_query("UPDATE {node} SET status = %d WHERE nid = %d", 1, $nid);
+  // Finally publish the node if it is currently unpublished.  Instead of
+  // directly updating {node}.status, we use node_save() so that other modules
+  // which implement hook_nodeapi() will know that this node is now published.
+  // However, we don't want to waste too much RAM by leaving all these loaded
+  // nodes in RAM, so we reset the node_load() cache each time we call it.
+  $status = db_result(db_query("SELECT status from {node} WHERE nid = %d", $nid));
+  if (empty($status)) {
+    $node = node_load($nid, NULL, TRUE);
+    if (!empty($node->nid)) {
+      $node->status = 1;
+      node_save($node);
+    }
+    else {
+      wd_err('node_load(@nid) failed', array('@nid' => $nid));
+    }
+  }
 }
 
 /**
