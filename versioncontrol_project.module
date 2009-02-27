@@ -1720,3 +1720,44 @@ function versioncontrol_project_versioncontrol_repository($op, $repository) {
       break;
   }
 }
+
+/**
+ * Implementation of hook_project_issue_assignees():
+ * Add all users who are maintainers of the module to the lists of people
+ * who issues can be assigned to.
+ */
+function versioncontrol_project_project_issue_assignees(&$assigned, $issue_node) {
+  global $user;
+  if (empty($user->uid) || empty($issue_node->project_issue['pid'])) {
+    return; // No results for the anonymous user and for non-issue nodes.
+  }
+  $project_node = node_load($issue_node->project_issue['pid']);
+  if (!isset($project_node) || $project_node->type != 'project_project') {
+    return; // No results if the project node is not found.
+  }
+  if (!versioncontrol_project_node_uses_versioncontrol($project_node)) {
+    return; // No results if the project is not integrated with version control.
+  }
+  if (!in_array($user->uid, $project_node->versioncontrol_project['maintainer_uids'])) {
+    return; // Only maintainers can assign issues to other maintainers.
+  }
+
+  // Add any maintainers of this project who are not already in the
+  // $assigned array to the array.
+  $placeholders = array();
+  $params = array();
+
+  foreach ($project_node->versioncontrol_project['maintainer_uids'] as $uid) {
+    if (!isset($assigned[$uid])) {
+      $placeholders[] = '%d';
+      $params[] = $uid;
+    }
+  }
+  $result = db_query('SELECT uid, name FROM {users}
+                      WHERE uid IN ('. implode(',', $placeholders) .')',
+                      $params);
+
+  while ($maintainer = db_fetch_object($result)) {
+    $assigned[$maintainer->uid] = $maintainer->name;
+  }
+}
