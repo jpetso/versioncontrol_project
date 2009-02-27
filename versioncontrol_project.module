@@ -6,7 +6,7 @@
  * (provided by the Project module) with version control systems supported
  * by the Version Control API.
  *
- * Copyright 2006, 2007 Derek Wright ("dww", http://drupal.org/user/46549)
+ * Copyright 2006, 2007 by Derek Wright ("dww", http://drupal.org/user/46549)
  * Copyright 2007, 2008, 2009 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
 
@@ -58,7 +58,7 @@ function versioncontrol_project_menu() {
 
   $items['admin/project/versioncontrol-settings/project'] = array(
     'title' => 'Project node integration',
-    'description' => 'Specify the content types that will be integrated with version control systems, and configure how this will be done.',
+    'description' => 'Configure how project nodes will be integrated with version control systems.',
     'page callback' => 'drupal_get_form',
     'page arguments' => array('versioncontrol_project_admin_form'),
     'access callback' => 'versioncontrol_admin_access',
@@ -110,13 +110,24 @@ function versioncontrol_project_menu() {
 }
 
 /**
+ * Return TRUE if a given (project) node has a repository location associated,
+ * or FALSE otherwise.
+ */
+function versioncontrol_project_node_uses_versioncontrol($node) {
+  if (empty($node->versioncontrol_project) || empty($node->versioncontrol_project['repo_id'])) {
+    return FALSE;
+  }
+  return TRUE;
+}
+
+/**
  * Menu wildcard loader for version control enabled project nodes
  * ('%versioncontrol_project_node'). Returns FALSE if the project is not
  * associated with any repository location, or the node object otherwise.
  */
 function versioncontrol_project_node_load($nid) {
   $node = node_load($nid);
-  if (!empty($node->versioncontrol_project) && $node->versioncontrol_project['repo_id'] > 0) {
+  if (versioncontrol_project_node_uses_versioncontrol($node)) {
     return $node;
   }
   return FALSE;
@@ -155,7 +166,7 @@ function versioncontrol_project_commit_access_edit_access($project_node, $accoun
  * Add a link to the project's commit log to the resources section.
  */
 function versioncontrol_project_project_page_link_alter(&$links, $node) {
-  if (isset($node->versioncontrol_project) && $node->versioncontrol_project['repo_id'] > 0) {
+  if (versioncontrol_project_node_uses_versioncontrol($node)) {
     $links['development']['links']['view_commitlog'] = l(t('View commit messages'), 'node/'. $node->nid .'/commitlog');
   }
 }
