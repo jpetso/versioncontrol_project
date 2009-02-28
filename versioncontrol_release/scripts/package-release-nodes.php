@@ -84,11 +84,6 @@ $_SERVER['PHP_SELF'] = '/' . $script_name;
 $_SERVER['SCRIPT_FILENAME'] = $_SERVER['PWD'] . '/' . $script_name;
 $_SERVER['PATH_TRANSLATED'] = $_SERVER['SCRIPT_FILENAME'];
 
-// Set a variable so that on sites using DB replication, we ensure that all
-// our queries are against the primary database to avoid problems where the
-// connection to a secondary DB might timeout causing node_load() to fail.
-$_SESSION['not_slavesafe'] = TRUE;
-
 if (!chdir($drupal_root)) {
   fwrite(STDERR, "ERROR: Can't chdir($drupal_root): aborting.\n");
   exit(1);
@@ -100,6 +95,11 @@ umask(0022);
 
 require_once 'includes/bootstrap.inc';
 drupal_bootstrap(DRUPAL_BOOTSTRAP_FULL);
+
+// Set a variable so that on sites using DB replication, we ensure that all
+// our queries are against the primary database to avoid problems where the
+// connection to a secondary DB might timeout causing node_load() to fail.
+$_SESSION['not_slavesafe'] = TRUE;
 
 if ($task == 'check' || $task == 'repair') {
   verify_packages($task, $project_id);
@@ -202,7 +202,7 @@ function package_releases($type, $project_id) {
 
     $wd_err_msg = array();
     $version = $release->version;
-    $release_nid = $release->nid;
+    $release_nid = $release->release_nid;
     $tid = $release->tid;
 
     $project = array(
@@ -217,13 +217,11 @@ function package_releases($type, $project_id) {
       'name' => $release->label_name,
       'type' => $release->label_type,
     );
-    $rev = '-r ' . $label['name'];
     $major = $release->version_major;
     $version = escapeshellcmd($version);
-    $rev = escapeshellcmd($rev);
     db_query("DELETE FROM {project_release_package_errors} WHERE nid = %d", $release_nid);
 
-    $built = package_release($release_nid, $project, $repository, $version, $rev);
+    $built = package_release($release_nid, $project, $repository, $version, $label);
 
     if ($built) {
       $num_built++;
@@ -257,7 +255,7 @@ function package_releases($type, $project_id) {
   }
 }
 
-function package_release($release_nid, $project, $repository, $version, $rev) {
+function package_release($release_nid, $project, $repository, $version, $label) {
   global $tmp_dir, $drupal_root, $dest_root, $dest_rel;
   global $cvs, $tar, $gzip, $rm, $ln, $mkdir;
   global $license, $trans_install;
@@ -285,28 +283,19 @@ function package_release($release_nid, $project, $repository, $version, $rev) {
   // Don't use drupal_exec() or return if this fails, we expect it to be empty.
   exec("$rm -rf $export_dir");
 
-  // Create the target directory and chdir() to it, because "cvs export" can't
-  // take absolute export directory paths as argument.
-  if (!drupal_exec("$mkdir -p $export_dir")) {
-    return FALSE;
-  }
-  if (!drupal_chdir($export_dir)) {
-    return FALSE;
-  }
-  // Checkout this release from CVS, and see if we need to rebuild it.
-  putenv('CVSROOT=' . escapeshellcmd($repository['root']));
-  if (!drupal_exec("$cvs -q export $rev -d . $relative_project_dir")) {
-    return FALSE;
-  }
-  drupal_chdir($drupal_root);
-
-  if (!is_dir($export_dir)) {
-    wd_err("ERROR: %dir does not exist after cvs export %rev", array(
+  include_once(drupal_get_path('module', 'versioncontrol_cvs') .'/cvslib/cvslib.inc');
+  $success = cvslib_export(
+    $export_dir, $repository['root'], $project['directory'],
+    array('revision' => $label['name'])
+  );
+  if (!$success) {
+    wd_err("ERROR: %dir @ !labeltype %labelname could not be exported", array(
       '%dir' => $export_dir,
-      '%rev' =>  $rev,
+      '!labeltype' => ($label['type'] == VERSIONCONTROL_OPERATION_BRANCH)
+                      ? t('branch')
+                      : t('tag'),
+      '%labelname' => $label['name'],
     ), $view_link);
-    // TODO (dww): try to clean up the cvs export we just did?
-    // jpetso: if there's no directory, what's left to clean up?
     return FALSE;
   }
 
