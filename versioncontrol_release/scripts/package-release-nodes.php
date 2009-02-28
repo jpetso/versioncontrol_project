@@ -207,7 +207,7 @@ function package_releases($type, $project_id) {
 
     $project = array(
       'uri' => $release->uri,
-      'nid' => $release->pid,
+      'nid' => $release->project_nid,
       'repo_id' => $release->directory,
       'directory' => $release->directory,
     );
