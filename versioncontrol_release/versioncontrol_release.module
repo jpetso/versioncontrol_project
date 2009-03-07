@@ -386,12 +386,7 @@ function versioncontrol_release_project_release_form_alter_add_node_form(&$form,
 
   $version = versioncontrol_release_get_version_from_label($label, $project_node);
 
-  if (!empty($version)) {
-    // Since we got the version info from the label, we don't want to try
-    // try to validate the version field elements.
-    unset($form['validate_version']);
-  }
-  else {
+  if (empty($version)) {
     // This is for labels that cannot automatically be assigned a
     // version object (and in turn, a version string). This includes default
     // branches like HEAD or master, as well as labels which have been left
