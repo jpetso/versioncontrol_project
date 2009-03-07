@@ -94,17 +94,28 @@ function versioncontrol_release_get_version_from_label($label, $project_node) {
   }
 
   // Remove any fields padded with FALSE.
+  $positive_version_numbers = FALSE;
   foreach ($version as $field => $number) {
     if ($number === FALSE) {
       unset($version[$field]);
     }
+    elseif ($number > 0) {
+      $positive_version_numbers = TRUE;
+    }
   }
 
-  if (!empty($positive_version_numbers) && !empty($label_parts)) {
-    // The next label part is the one after the last numeric part, like "beta1".
-    // From that position on, use the rest of $label['name'] as version extra.
-    $label_part = array_shift($label_parts);
-    $version['version_extra'] = substr($label['name'], $label_part[1]);
+  if (!empty($positive_version_numbers)) {
+    if ($label['type'] == VERSIONCONTROL_OPERATION_BRANCH) {
+      // Branches always get a "-dev" appended. Looks good, and helps with
+      // reverse engineering the version number.
+      $version['version_extra'] = 'dev';
+    }
+    elseif (!empty($label_parts)) {
+      // The next label part is the one after the last numeric part, like "beta1".
+      // From that position on, use the rest of $label['name'] as version extra.
+      $label_part = array_shift($label_parts);
+      $version['version_extra'] = substr($label['name'], $label_part[1]);
+    }
     return (object) $version;
   }
   else {
@@ -123,6 +134,10 @@ function versioncontrol_release_get_label_name_from_version($version, $project) 
     return versioncontrol_release_local_get_tag_from_version($version, $project);
   }
   $version_array = (array) $version;
+
+  if ($version_array['version_extra'] == 'dev') {
+    unset($version_array['version_extra']);
+  }
   $label_name = implode('-', $version_array);
   return $label_name;
 }
