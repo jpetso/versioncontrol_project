@@ -684,23 +684,38 @@ function versioncontrol_release_project_release_form_alter_edit(&$form, &$form_s
     $allow_branch_switch = TRUE;
   }
   if (!$allow_branch_switch && $release_label['type'] == VERSIONCONTROL_OPERATION_BRANCH) {
-    $version = versioncontrol_release_get_version_from_label($release_label);
-    $allow_branch_switch = empty($version);
+    $version_from_label = versioncontrol_release_get_version_from_label($release_label, $project_node);
+    $allow_branch_switch = empty($version_from_label);
   }
 
   if ($allow_branch_switch) {
+    $fields = array('version_major', 'version_minor', 'version_patch', 'version_extra');
     $possible_labels = versioncontrol_release_get_possible_labels($project_node->nid);
     $possible_labels[$release_label['label_id']] = $release_label;
 
     if (!user_access('administer projects')) {
       // A non-admin editing a HEAD node. Search for another tag (if
       // any) that matches the current version info for this release.
-      $version = $release_node->project_release; // contains all version parts
-      $expected_name = versioncontrol_release_get_label_name_from_version($version, $project_node);
+      $current_version = $release_node->project_release; // contains all version parts
 
       foreach ($possible_labels as $label_id => $label) {
-        if ($label['name'] != $expected_name) {
+        if ($label_id == $release_label['label_id']) {
+          continue;
+        }
+        $version_from_label = versioncontrol_release_get_version_from_label($label, $project_node);
+
+        // Don't make it possible to switch to labels like HEAD.
+        if (empty($version_from_label)) {
           unset($possible_labels[$label_id]);
+          continue;
+        }
+
+        // Don't make it possible to switch to labels with different versions.
+        foreach ($fields as $field) {
+          if ($version_from_label->$field != $current_version[$field]) {
+            unset($possible_labels[$label_id]);
+            break;
+          }
         }
       }
     }
@@ -745,6 +760,10 @@ function versioncontrol_release_project_release_form_alter_edit(&$form, &$form_s
     );
   }
   unset($form['tag']);
+
+  // Don't show the fieldset to enter the version number parts.
+  $form['project_release']['#access'] = FALSE;
+  $form['rel_id']['#access'] = FALSE; // rel_id is for "release identification"
 
   $file = db_fetch_object(db_query("SELECT filepath FROM {files} f INNER JOIN {project_release_file} prf ON f.fid = prf.fid WHERE prf.nid = %d", $release_node->nid));
   // Make sure the file upload UI is gone if this project has a repository set
