@@ -124,25 +124,6 @@ function versioncontrol_release_get_version_from_label($label, $project_node) {
 }
 
 /**
- * Returns the VCS label name that should match the given version information.
- *
- * If there is a local, site-specific implementation, use that.  Otherwise, the
- * label name is made by concatenating all parts of the version with hyphens.
- */
-function versioncontrol_release_get_label_name_from_version($version, $project) {
-  if (function_exists('versioncontrol_release_local_get_tag_from_version')) {
-    return versioncontrol_release_local_get_tag_from_version($version, $project);
-  }
-  $version_array = (array) $version;
-
-  if ($version_array['version_extra'] == 'dev') {
-    unset($version_array['version_extra']);
-  }
-  $label_name = implode('-', $version_array);
-  return $label_name;
-}
-
-/**
  * Return an array of labels that are still unused for the given project,
  * with the label_id of each label array used as array key.
  */
