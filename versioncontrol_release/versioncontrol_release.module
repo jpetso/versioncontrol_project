@@ -750,8 +750,14 @@ function versioncontrol_release_project_release_form_alter_edit(&$form, &$form_s
   // Make sure the file upload UI is gone if this project has a repository set
   // because in that case users should *never* have a way to upload files.
   // Otherwise, if no repository is set for this project, keep the upload UI.
-  if ((!$file || empty($file->filepath))
-      && versioncontrol_project_node_uses_versioncontrol($project_node)) {
-    unset($form['project_release_files']);
+  if (versioncontrol_project_node_uses_versioncontrol($project_node)) {
+    if (!$file || empty($file->filepath)) {
+      unset($form['project_release_files']);
+    }
+    else {
+      foreach (element_children($form['project_release_files']) as $key) {
+        $form['project_release_files'][$key]['delete']['#access'] = FALSE;
+      }
+    }
   }
 }
