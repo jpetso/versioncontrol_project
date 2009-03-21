@@ -143,10 +143,14 @@ function versioncontrol_project_node_load($nid) {
  *   with versioncontrol_project_node_load().
  */
 function versioncontrol_project_commit_access_edit_access($project_node, $account = NULL) {
+  if (!isset($account)) {
+    global $user;
+    $account = clone $user;
+  }
   if (!node_access('view', $project_node, $account)) {
     return FALSE;
   }
-  $repo_id = $node->versioncontrol_project['repo_id'];
+  $repo_id = $project_node->versioncontrol_project['repo_id'];
   $repository = versioncontrol_get_repository($repo_id);
 
   // Grant access to the node owner.
