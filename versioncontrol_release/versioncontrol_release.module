@@ -127,24 +127,56 @@ function versioncontrol_release_get_version_from_label($label, $project_node) {
  * Return an array of labels that are still unused for the given project,
  * with the label_id of each label array used as array key.
  */
-function versioncontrol_release_get_possible_labels($project_nid) {
+function versioncontrol_release_get_possible_labels($project_node) {
+  if (!versioncontrol_project_node_uses_versioncontrol($project_node)) {
+    return array();
+  }
+  $project = $project_node->versioncontrol_project;
+  $repository = versioncontrol_get_repository($project['repo_id']);
+
+  if (empty($repository)) {
+    return array();
+  }
+  $directory_item = versioncontrol_get_item($repository, $project['directory']);
+
+  if (empty($directory_item)) {
+    return array();
+  }
+  $parallel_items = versioncontrol_get_parallel_items($repository, $directory_item);
+
+  if (empty($parallel_items)) {
+    return array();
+  }
   $result = db_query('SELECT DISTINCT(label.label_id), label.name,
-                        label.repo_id, label.type
+                        label.repo_id, label.type, rlabel.release_nid
                       FROM {versioncontrol_labels} label
-                        INNER JOIN {versioncontrol_operation_labels} oplabel
-                          ON label.label_id = oplabel.label_id
-                        INNER JOIN {versioncontrol_project_operations} projop
-                          ON oplabel.vc_op_id = projop.vc_op_id
                         LEFT JOIN {versioncontrol_release_labels} rlabel
-                          ON projop.nid = rlabel.project_nid
-                          AND label.label_id = rlabel.label_id
-                      WHERE projop.nid = %d
-                        AND rlabel.label_id IS NULL
+                        ON label.label_id = rlabel.label_id
+                      WHERE rlabel.project_nid = %d
                       ORDER BY label.type DESC, label.name DESC',
-                      $project_nid);
-  $labels = array();
-  while ($label = db_fetch_array($result)) {
-    $labels[$label['label_id']] = $label;
+                      $project_node->nid);
+  $db_labels = array();
+  $released_labels = array();
+
+  while ($dblabel = db_fetch_object($result)) {
+    $db_labels[$dblabel->repo_id][$dblabel->type][$dblabel->name] = $dblabel->label_id;
+    if (!empty($dblabel->release_nid)) {
+      $released_labels[$dblabel->label_id] = TRUE;
+    }
+  }
+  foreach ($parallel_items as $item) {
+    $label = versioncontrol_get_item_selected_label($repository, $item);
+    if (!empty($label)) {
+      if (isset($db_labels[$label['repo_id']][$label['type']][$label['name']])) {
+        $label['label_id'] = $db_labels[$label['repo_id']][$label['type']][$label['name']];
+      }
+      else {
+        $label = versioncontrol_ensure_label($repository, $label);
+      }
+      if (!isset($released_labels[$label['label_id']])) {
+        $labels[$label['label_id']] = $label;
+      }
+    }
   }
   return $labels;
 }
@@ -252,7 +284,7 @@ function versioncontrol_release_project_release_form_alter_add_select_label(&$fo
   unset($form['validate_version']);
 
   // Gather possible values for a label selector.
-  $possible_labels = versioncontrol_release_get_possible_labels($project_node->nid);
+  $possible_labels = versioncontrol_release_get_possible_labels($project_node);
   $tags_t = t('Tags');
   $branches_t = t('Branches');
   $label_options = array();
@@ -671,7 +703,7 @@ function versioncontrol_release_project_release_form_alter_edit(&$form, &$form_s
 
   if ($allow_branch_switch) {
     $fields = array('version_major', 'version_minor', 'version_patch', 'version_extra');
-    $possible_labels = versioncontrol_release_get_possible_labels($project_node->nid);
+    $possible_labels = versioncontrol_release_get_possible_labels($project_node);
     $possible_labels[$release_label['label_id']] = $release_label;
 
     if (!user_access('administer projects')) {
