@@ -155,7 +155,7 @@ function versioncontrol_project_commit_access_edit_access($project_node, $accoun
 
   // Grant access to the node owner.
   if ($project_node->uid == $account->uid
-      && versioncontrol_is_account_authorized($account->uid, $repository)) {
+      && versioncontrol_is_account_authorized($repository, $account->uid)) {
     return TRUE;
   }
   // Grant access to version control and node admins.
@@ -573,7 +573,7 @@ function versioncontrol_project_commit_access_table($form, $form_state) {
     }
 
     // Indicate any maintainers whose account is no longer approved.
-    if (!versioncontrol_is_account_authorized($uid, $project_repository)) {
+    if (!versioncontrol_is_account_authorized($project_repository, $uid)) {
       $username = '<del>'. theme('username', $user) .'</del> <em>('. t('repository access disabled') .')</em>';
     }
     else {
