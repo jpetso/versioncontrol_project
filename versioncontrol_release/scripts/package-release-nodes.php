@@ -175,6 +175,17 @@ function package_releases($type, $project_id) {
   $num_considered = 0;
   $project_nids = array();
 
+  // Determine the list of sufficient VCS backends, in order to avoid errors
+  // in edge cases. (In the common case, unsupported backends don't generate
+  // releases with VCS integration, but who knows what might happen.)
+  $backends = versioncontrol_get_backends();
+  $supported_backends = array();
+  foreach ($backends as $vcs => $backend) {
+    if (versioncontrol_release_is_supported_backend($vcs)) {
+      $supported_backends[] = $vcs;
+    }
+  }
+
   // Read everything out of the query immediately so that we don't leave the
   // query object/connection open while doing other queries.
   $releases = array();
@@ -185,6 +196,7 @@ function package_releases($type, $project_id) {
     // Fetch the repository where the project is located.
     $repositories = versioncontrol_get_repositories(array(
       'repo_ids' => array($release->repo_id),
+      'vcs' => $supported_backends,
     ));
     if (empty($repositories)) {
       $num_considered++;
