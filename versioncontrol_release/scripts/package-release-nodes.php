@@ -32,7 +32,6 @@ $drupal_root = realpath($drupal_root);
 $dest_root = realpath($dest_root);
 $tmp_root = realpath($tmp_root);
 $license = realpath($license);
-$trans_install = realpath($trans_install);
 $dest_root = realpath($dest_root);
 
 // Check if all required variables are defined.
@@ -42,7 +41,6 @@ $vars = array(
   'site_name' => $site_name,
   'tmp_root' => $tmp_root,
   'license' => $license,
-  'trans_install' => $trans_install, ///TODO (jpetso): unused?
 );
 foreach ($vars as $name => $val) {
   if (empty($val)) {
@@ -187,7 +185,6 @@ function package_releases($type, $project_id) {
     // Fetch the repository where the project is located.
     $repositories = versioncontrol_get_repositories(array(
       'repo_ids' => array($release->repo_id),
-      'vcs' => array('cvs'), // the script can't do better at the moment
     ));
     if (empty($repositories)) {
       $num_considered++;
@@ -208,7 +205,6 @@ function package_releases($type, $project_id) {
     );
     $label = array(
       'label_id' => $release->label_id,
-      'repo_id' => $release->repo_id,
       'name' => $release->label_name,
       'type' => $release->label_type,
     );
@@ -252,16 +248,23 @@ function package_releases($type, $project_id) {
 
 function package_release($release_nid, $project, $repository, $version, $label) {
   global $tmp_dir, $drupal_root, $dest_root, $dest_rel;
-  global $cvs, $tar, $gzip, $rm, $ln, $mkdir;
-  global $license, $trans_install;
+  global $tar, $gzip, $rm, $ln, $mkdir;
+  global $license;
 
-  // In Version Control API, item paths start with a slash. Remove that for CVS.
+  $project_directory_item = versioncontrol_get_item(
+    $repository, $project['directory'], array('label' => $label)
+  );
+  if (empty($project_directory_item)) {
+    wd_err('ERROR: Could not retrieve project directory item.');
+  }
+
+  // In Version Control API, item paths start with a slash.
   $relative_project_dir = escapeshellcmd(substr($project['directory'], 1));
   $uri = escapeshellcmd($project['uri']);
 
   ///TODO: drupal.org specific hack, get rid of it somehow
-  $is_core = ($repository['repo_id'] == 1 && $uri == 'drupal');
-  $is_contrib = ($repository['repo_id'] == 2);
+  $is_core = ($site_name == 'drupal.org' && $repository['repo_id'] == 1 && $uri == 'drupal');
+  $is_contrib = ($site_name == 'drupal.org' && $repository['repo_id'] == 2);
 
   $id = $uri . '-' . $version;
   $view_link = l(t('view'), 'node/' . $release_nid);
@@ -274,17 +277,10 @@ function package_release($release_nid, $project, $repository, $version, $label) 
   if ($is_contrib) { ///TODO: drupal.org specific hack, get rid of it somehow
     $export_dir = $tmp_dir . '/' . $relative_project_dir;
   }
+  $success = versioncontrol_export_directory($repository, $project_directory_item, $export_dir);
 
-  // Don't use drupal_exec() or return if this fails, we expect it to be empty.
-  exec("$rm -rf $export_dir");
-
-  include_once(drupal_get_path('module', 'versioncontrol_cvs') .'/cvslib/cvslib.inc');
-  $success = cvslib_export(
-    $export_dir, $repository['root'], $project['directory'],
-    array('revision' => $label['name'])
-  );
   if (!$success) {
-    wd_err("ERROR: %dir @ !labeltype %labelname could not be exported", array(
+    wd_err('ERROR: %dir @ !labeltype %labelname could not be exported', array(
       '%dir' => $export_dir,
       '!labeltype' => ($label['type'] == VERSIONCONTROL_OPERATION_BRANCH)
                       ? t('branch')
@@ -309,7 +305,8 @@ function package_release($release_nid, $project, $repository, $version, $label) 
   // Fix any .info files.
   foreach ($info_files as $file) {
     if (!fix_info_file_version($file, $uri, $version)) {
-      wd_err("ERROR: Failed to update version in %file, aborting packaging", array('%file' => $file), $view_link);
+      wd_err('ERROR: Failed to update version in %file, aborting packaging',
+              array('%file' => $file), $view_link);
       return FALSE;
     }
   }
