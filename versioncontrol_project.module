@@ -792,43 +792,54 @@ function versioncontrol_project_user($type, &$edit, &$account, $category = NULL)
  */
 function versioncontrol_project_block($op = 'list', $delta = 0) {
   if ($op == 'list') {
-    $blocks[0]['info'] = t('Most active projects');
-    $blocks[0]['cache'] = BLOCK_NO_CACHE;
+    $blocks = array();
+    $blocks['versioncontrol_project_site_active_projects'] = array(
+      'info' => t('Most active projects'),
+      'cache' => BLOCK_CACHE_GLOBAL,
+    );
     return $blocks;
   }
   else if ($op == 'view') {
-    if ($delta == 0) {
-      $interval = 7 * 24 * 60 * 60;
-      $limit = 15;
-
-      $result = db_query_range('
-        SELECT n.nid, n.title, COUNT(projop.vc_op_id) as number_commits
-        FROM {versioncontrol_operations} op
-          INNER JOIN {versioncontrol_project_operations} projop
-            ON op.vc_op_id = projop.vc_op_id
-          INNER JOIN {node} n
-            ON projop.nid = n.nid
-        WHERE op.date >= %d AND op.type = %d AND n.status = 1
-        GROUP BY n.nid, n.title
-        ORDER BY number_commits DESC',
-        array(time() - $interval, VERSIONCONTROL_OPERATION_COMMIT),
-        0, $limit
-      );
-      $project_titles = array();
-
-      while ($project_stats = db_fetch_object($result)) {
-        $nid = $project_stats->nid;
-        $project_titles[] = l($project_stats->title, 'node/'. $nid);
-      }
-      if (!empty($project_titles)) {
-        $block = array(
-          'subject' => t('Most active projects'),
-          'content' => theme('item_list', $project_titles),
-        );
-        return $block;
-      }
+    if ($delta == 'versioncontrol_project_site_active_projects') {
+      return versioncontrol_project_block_site_active_projects();
     }
   }
+}
+
+/**
+ * Implementation of hook_block($op='view') for the "active projects" block.
+ */
+function versioncontrol_project_block_site_active_projects() {
+  $block = array();
+  $interval = 7 * 24 * 60 * 60;
+  $limit = 15;
+
+  $result = db_query_range('
+    SELECT n.nid, n.title, COUNT(projop.vc_op_id) as number_commits
+    FROM {versioncontrol_operations} op
+      INNER JOIN {versioncontrol_project_operations} projop
+        ON op.vc_op_id = projop.vc_op_id
+      INNER JOIN {node} n
+        ON projop.nid = n.nid
+    WHERE op.date >= %d AND op.type = %d AND n.status = 1
+    GROUP BY n.nid, n.title
+    ORDER BY number_commits DESC',
+    array(time() - $interval, VERSIONCONTROL_OPERATION_COMMIT),
+    0, $limit
+  );
+  $project_titles = array();
+
+  while ($project_stats = db_fetch_object($result)) {
+    $nid = $project_stats->nid;
+    $project_titles[] = l($project_stats->title, 'node/'. $nid);
+  }
+  if (!empty($project_titles)) {
+    $block = array(
+      'subject' => t('Most active projects'),
+      'content' => theme('item_list', $project_titles),
+    );
+  }
+  return $block;
 }
 
 /**
