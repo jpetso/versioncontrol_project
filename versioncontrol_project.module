@@ -10,10 +10,22 @@
  * Copyright 2007, 2008, 2009 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
 
-// The nid used for project/item associations in {versioncontrol_project_items}
-// that have been checked, but are not associated to any project.
-// Useful for keeping track of which items have been checked and which haven't.
+/**
+ * The nid used for project/item associations in {versioncontrol_project_items}
+ * that have been checked, but are not associated to any project.
+ * Useful for keeping track of which items have been checked and which haven't.
+ */
 define('VERSIONCONTROL_PROJECT_NID_NONE', 0);
+
+/**
+ * @name Project relation constraints
+ * Allowed values for use with the 'project_relation' constraint in
+ * versioncontrol_get_operations() queries.
+ */
+//@{
+define('VERSIONCONTROL_PROJECT_ASSOCIATED',           1);
+define('VERSIONCONTROL_PROJECT_ASSOCIATED_PUBLISHED', 2);
+//@}
 
 
 /**
@@ -735,8 +747,13 @@ function versioncontrol_project_developers($node) {
   }
 
   $project = $node->versioncontrol_project;
-  $constraints = array('nids' => array($project['nid']));
-  return theme('versioncontrol_user_statistics', $constraints);
+  $constraints = array(
+    'types' => array(VERSIONCONTROL_OPERATION_COMMIT),
+    'nids' => array($project['nid']),
+  );
+  return theme('versioncontrol_user_statistics', $constraints, array(
+    'order_by' => array('date'),
+  ));
 }
 
 /**
@@ -848,8 +865,9 @@ function versioncontrol_project_block_site_active_projects() {
  */
 function versioncontrol_project_commitlog_constraints() {
   return array(
-    'maintainer_uids' => array('single' => 'maintainer', 'multiple' => 'maintainers'),
-    'nids'            => array('single' => 'nid',        'multiple' => 'nids'),
+    'maintainer_uids'  => array('single' => 'maintainer', 'multiple' => 'maintainers'),
+    'nids'             => array('single' => 'nid',        'multiple' => 'nids'),
+    'project_relation' => array('single' => 'project-relation'),
   );
 }
 
@@ -860,7 +878,11 @@ function versioncontrol_project_commitlog_constraints() {
  */
 function versioncontrol_project_versioncontrol_operation_constraint_info() {
   return array(
-    'nids' => array(),
+    'nids' => array('join callback' => 'versioncontrol_project_table_project_operations_join'),
+    'project_relation' => array(
+      'join callback' => 'versioncontrol_project_table_project_operations_join',
+      'cardinality' => VERSIONCONTROL_CONSTRAINT_SINGLE,
+    ),
   );
 }
 
@@ -904,14 +926,52 @@ function versioncontrol_project_operation_constraint_nids($constraint, &$tables,
     $placeholders[] = '%d';
     $params[] = $nid;
   }
+  $and_constraints[] = $tables['versioncontrol_project_operations']['alias'] .'.nid
+                        IN ('. implode(',', $placeholders) .')';
+}
+
+/**
+ * Filter operations by associated project node status.
+ */
+function versioncontrol_project_operation_constraint_project_relation($constraint, &$tables, &$and_constraints, &$params) {
+  $and_constraints[] = $tables['versioncontrol_project_operations']['alias'] .'.nid <> %d';
+  $params[] = VERSIONCONTROL_PROJECT_NID_NONE;
+
+  if ($constraint == VERSIONCONTROL_PROJECT_ASSOCIATED_PUBLISHED) {
+    versioncontrol_project_table_project_node_join($tables);
+    $and_constraints[] = $tables['versioncontrol_project_node']['alias'] .'.status = 1';
+  }
+}
+
+/**
+ * Take an existing @p $tables array and add the table join for
+ * {versioncontrol_project_operations}. Only meant to be used within a
+ * constraint construction callback.
+ */
+function versioncontrol_project_table_project_operations_join(&$tables) {
   if (!isset($tables['versioncontrol_project_operations'])) {
     $tables['versioncontrol_project_operations'] = array(
       'alias' => 'projop',
       'join_on' => $tables['versioncontrol_operations']['alias'] .'.vc_op_id = projop.vc_op_id',
     );
   }
-  $and_constraints[] = $tables['versioncontrol_project_operations']['alias'] .'.nid
-                        IN ('. implode(',', $placeholders) .')';
+}
+
+/**
+ * Take an existing @p $tables array and add the table joins for
+ * {versioncontrol_project_operations} and {node}. Only meant to be used within
+ * a constraint construction callback.
+ */
+function versioncontrol_project_table_project_node_join(&$tables) {
+  if (!isset($tables['versioncontrol_project_node'])) {
+    versioncontrol_project_table_project_operations_join($tables);
+
+    $tables['versioncontrol_project_node'] = array(
+      'real_table' => 'node',
+      'alias' => 'projnode',
+      'join_on' => $tables['versioncontrol_project_operations']['alias'] .'.nid = projnode.nid',
+    );
+  }
 }
 
 
