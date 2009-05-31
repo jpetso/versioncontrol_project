@@ -234,7 +234,7 @@ function versioncontrol_project_update_6100() {
 function versioncontrol_project_update_6101() {
   $ret = array();
   $ret[] = update_sql("
-    UPDATE {blocks} SET delta = 'versioncontrol_project_site_active_projects'
+    UPDATE {blocks} SET delta = 'site_active_projects'
     WHERE delta = '0' AND module = 'versioncontrol_project'");
   return $ret;
 }

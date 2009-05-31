@@ -810,14 +810,14 @@ function versioncontrol_project_user($type, &$edit, &$account, $category = NULL)
 function versioncontrol_project_block($op = 'list', $delta = 0) {
   if ($op == 'list') {
     $blocks = array();
-    $blocks['versioncontrol_project_site_active_projects'] = array(
-      'info' => t('Most active projects'),
+    $blocks['site_active_projects'] = array(
+      'info' => t('Version Control API: Most active projects'),
       'cache' => BLOCK_CACHE_GLOBAL,
     );
     return $blocks;
   }
   else if ($op == 'view') {
-    if ($delta == 'versioncontrol_project_site_active_projects') {
+    if ($delta == 'site_active_projects') {
       return versioncontrol_project_block_site_active_projects();
     }
   }
