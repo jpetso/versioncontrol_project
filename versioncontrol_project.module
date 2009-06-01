@@ -6,7 +6,7 @@
  * (provided by the Project module) with version control systems supported
  * by the Version Control API.
  *
- * Copyright 2006, 2007 by Derek Wright ("dww", http://drupal.org/user/46549)
+ * Copyright 2006, 2007, 2009 by Derek Wright ("dww", http://drupal.org/user/46549)
  * Copyright 2007, 2008, 2009 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
 
@@ -140,6 +140,26 @@ function versioncontrol_project_node_uses_versioncontrol($node) {
 function versioncontrol_project_node_load($nid) {
   $node = node_load($nid);
   if (versioncontrol_project_node_uses_versioncontrol($node)) {
+    return $node;
+  }
+  return FALSE;
+}
+
+/**
+ * Get the version-control-integrated project node from the currently active
+ * menu context, if possible.
+ *
+ * @return
+ *   A fully loaded project $node object if the currently active menu has a
+ *   project node context, or FALSE if the menu isn't pointing to a
+ *   project node or the node does not use version control functionality.
+ */
+function versioncontrol_project_node_from_menu() {
+  if ($node = menu_get_object('versioncontrol_project_node')) {
+    return $node;
+  }
+  $node = menu_get_object();
+  if (is_object($node) && versioncontrol_project_node_uses_versioncontrol($node)) {
     return $node;
   }
   return FALSE;
@@ -751,8 +771,13 @@ function versioncontrol_project_developers($node) {
     'types' => array(VERSIONCONTROL_OPERATION_COMMIT),
     'nids' => array($project['nid']),
   );
-  return theme('versioncontrol_user_statistics', $constraints, array(
-    'order_by' => array('date'),
+  $statistics = versioncontrol_get_operation_statistics($constraints, array(
+    'group_by' => array('uid', 'repo_id', 'username'),
+    'order_by' => array('last_operation_date'),
+  ));
+
+  return theme('versioncontrol_user_statistics_table', $statistics, array(
+    'constraints' => $constraints,
   ));
 }
 
@@ -807,18 +832,43 @@ function versioncontrol_project_user($type, &$edit, &$account, $category = NULL)
 /**
  * Implementation of hook_block(): Present a list of the most active projects.
  */
-function versioncontrol_project_block($op = 'list', $delta = 0) {
+function versioncontrol_project_block($op = 'list', $delta = 0, $edit = array()) {
   if ($op == 'list') {
     $blocks = array();
     $blocks['site_active_projects'] = array(
       'info' => t('Version Control API: Most active projects'),
       'cache' => BLOCK_CACHE_GLOBAL,
     );
+    // We roll our own caching for these blocks, since the existing block cache
+    // is cleared on every comment or node added on the site, which isn't at
+    // all what we need for this. There are expensive queries for this block,
+    // and it only changes when an operation is made to a given project.
+    $blocks['project_developers'] = array(
+      'info' => t('Version Control API: Project developers'),
+      'cache' => BLOCK_NO_CACHE,
+    );
+    $blocks['project_maintainers'] = array(
+      'info' => t('Version Control API: Project maintainers'),
+      'cache' => BLOCK_NO_CACHE,
+    );
     return $blocks;
   }
   else if ($op == 'view') {
     if ($delta == 'site_active_projects') {
       return versioncontrol_project_block_site_active_projects();
+    }
+    if ($delta == 'project_developers' || $delta == 'project_maintainers') {
+      return versioncontrol_project_block_project_committers($delta);
+    }
+  }
+  else if ($op == 'configure') {
+    if ($delta == 'project_developers' || $delta == 'project_maintainers') {
+      return versioncontrol_project_block_project_committers_configure($delta);
+    }
+  }
+  else if ($op == 'save') {
+    if ($delta == 'project_developers' || $delta == 'project_maintainers') {
+      return versioncontrol_project_block_project_committers_save($delta, $edit);
     }
   }
 }
@@ -858,6 +908,130 @@ function versioncontrol_project_block_site_active_projects() {
   }
   return $block;
 }
+
+/**
+ * Implementation of hook_block($op='configure') for the project developers
+ * or maintainers block.
+ *
+ * @param $delta
+ *   The block delta: either 'project_developers' or 'project_maintainers'.
+ */
+function versioncontrol_project_block_project_committers_configure($delta) {
+  $options = array();
+  for ($i = 1; $i <= 10; $i++) {
+    $options[$i] = $i;
+  }
+  $options['all'] = t('Unlimited');
+
+  $form = array();
+  $form['versioncontrol_'. $delta .'_block_length'] = array(
+    '#type' => 'select',
+    '#options' => $options,
+    '#title' => t('Number of developers to display'),
+    '#default_value' => variable_get('versioncontrol_'. $delta .'_block_length', 5),
+  );
+  return $form;
+}
+
+/**
+ * Implementation of hook_block($op='save') for the project developers or
+ * maintainers block.
+ *
+ * @param $delta
+ *   The block delta: either 'project_developers' or 'project_maintainers'.
+ */
+function versioncontrol_project_block_project_committers_save($delta, $edit) {
+  variable_set('versioncontrol_'. $delta .'_block_length',
+    $edit['versioncontrol_'. $delta .'_block_length']
+  );
+  // Clear the cache because it might now contain statistics for a too limited
+  // set of committers, and as an overall easy way to regenerate the values.
+  _versioncontrol_project_block_cache_clear();
+}
+
+/**
+ * Implementation of hook_block($op='view') for the project developers or
+ * maintainers block.
+ *
+ * @param $delta
+ *   The block delta: either 'project_developers' or 'project_maintainers'.
+ */
+function versioncontrol_project_block_project_committers($delta) {
+  $block = array();
+  $project_node = versioncontrol_project_node_from_menu();
+
+  if (!$project_node) {
+    return $block;
+  }
+  if (!user_access('access commit messages') || !node_access('view', $project_node)) {
+    return $block;
+  }
+  $cid = 'versioncontrol_'. $delta .'_statistics:'. $project_node->nid;
+  $statistics = _versioncontrol_project_block_cache_get($cid);
+
+  if (empty($statistics)) {
+    $constraints = array(
+      'types' => array(VERSIONCONTROL_OPERATION_COMMIT),
+      'nids' => array($project_node->nid),
+    );
+    if ($delta == 'project_maintainers') {
+      $constraints['uids'] = $project_node->versioncontrol_project['maintainer_uids'];
+      $group_by = array('uid'); // per Drupal user
+    }
+    else { // $delta == 'project_developers'
+      // Group per account, because no associated Drupal user might be involved.
+      $group_by = array('uid', 'repo_id', 'username');
+    }
+    $statistics = versioncontrol_get_operation_statistics($constraints, array(
+      'group_by' => $group_by,
+      'order_by' => array('last_operation_date'),
+      'query_type' => 'range',
+      'count' => variable_get('versioncontrol_'. $delta .'_block_length', 5),
+      'from' => 0,
+    ));
+    _versioncontrol_project_block_cache_set($cid, $statistics);
+  }
+
+  $title = ($delta == 'project_maintainers')
+    ? t('Maintainers for @project', array('@project' => $project_node->title))
+    : t('Developers for @project', array('@project' => $project_node->title));
+  $more_link = l(t('View all developers'), 'node/'. $project_node->nid .'/developers');
+
+  $block = array(
+    'subject' => $title,
+    'content' => theme('versioncontrol_user_statistics_item_list', $statistics, $more_link),
+  );
+  return $block;
+}
+
+function _versioncontrol_project_block_cache_get($cid) {
+  $data = db_result(db_query("SELECT data FROM {versioncontrol_project_cache_block}
+                              WHERE cid = '%s'", $cid));
+  if (!empty($data)) {
+    return unserialize($data);
+  }
+}
+
+function _versioncontrol_project_block_cache_set($cid, $data) {
+  if (empty($data)) {
+    db_query("DELETE FROM {versioncontrol_project_cache_block}
+              WHERE cid = '%s'", $cid);
+  }
+  else {
+    $serialized = serialize($data);
+    db_query("UPDATE {versioncontrol_project_cache_block}
+              SET data = '%s' WHERE cid = '%s'", $serialized, $cid);
+    if (!db_affected_rows()) {
+      db_query("INSERT INTO {versioncontrol_project_cache_block} (cid, data)
+                VALUES ('%s', '%s')", $cid, $serialized);
+    }
+  }
+}
+
+function _versioncontrol_project_block_cache_clear() {
+  db_query("DELETE FROM {versioncontrol_project_cache_block}");
+}
+
 
 /**
  * Implementation of hook_commitlog_constraints():
@@ -1566,6 +1740,9 @@ function versioncontrol_project_set_project($project) {
   else {
     $project['comaintainer_uids'] = array();
   }
+  // The list of maintainers has potentially changed, clear the block cache.
+  $cid = 'versioncontrol_project_maintainers_statistics:'. $project['nid'];
+  _versioncontrol_project_block_cache_set($cid, NULL);
 
   $project['maintainer_uids'] = array($project['owner_uid']);
   foreach ($project['comaintainer_uids'] as $comaintainer_uid) {
@@ -1749,6 +1926,8 @@ function versioncontrol_project_versioncontrol_account($op, $uid, $username, $re
 function versioncontrol_project_versioncontrol_operation($op, $operation, $operation_items) {
   switch ($op) {
     case 'insert':
+      $project = NULL;
+
       // Update the project/item associations with the new operation items.
       foreach ($operation_items as $path => $item) {
         $project = versioncontrol_project_get_project_for_item(
@@ -1757,6 +1936,14 @@ function versioncontrol_project_versioncontrol_operation($op, $operation, $opera
         _versioncontrol_project_add_item_association($item['item_revision_id'],
           (empty($project) ? VERSIONCONTROL_PROJECT_NID_NONE : $project['nid'])
         );
+      }
+      // A new operation (probably a commit) has been registered, so clear the
+      // block cache with project commit statistics.
+      if (isset($project)) {
+        $cid = 'versioncontrol_project_developers_statistics:'. $project['nid'];
+        _versioncontrol_project_block_cache_set($cid, NULL);
+        $cid = 'versioncontrol_project_maintainers_statistics:'. $project['nid'];
+        _versioncontrol_project_block_cache_set($cid, NULL);
       }
       break;
 

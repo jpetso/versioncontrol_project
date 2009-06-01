@@ -7,8 +7,8 @@
  * by the Version Control API.
  *
  * Copyright 2006 by Karthik ("Zen", http://drupal.org/user/21209)
- * Copyright 2006, 2007 by Derek Wright ("dww", http://drupal.org/user/46549)
- * Copyright 2007 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
+ * Copyright 2006, 2007, 2009 by Derek Wright ("dww", http://drupal.org/user/46549)
+ * Copyright 2007, 2009 by Jakob Petsovits ("jpetso", http://drupal.org/user/56020)
  */
 
 /**
@@ -109,6 +109,26 @@ function versioncontrol_project_schema() {
     'primary key' => array('vc_op_id', 'nid'),
   );
 
+  $schema['versioncontrol_project_cache_block'] = array(
+    'description' => t('Cache for project-node-specific blocks that cannot rely on the normal block cache.'),
+    'fields' => array(
+      'cid' => array(
+        'description' => 'Primary Key: Unique cache ID.',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'data' => array(
+        'description' => 'A collection of data to cache.',
+        'type' => 'blob',
+        'not null' => FALSE,
+        'size' => 'big',
+      ),
+    ),
+    'primary key' => array('cid'),
+  );
+
   return $schema;
 }
 
@@ -156,6 +176,8 @@ function versioncontrol_project_uninstall() {
     'versioncontrol_project_restrict_creation',
     'versioncontrol_project_dir_validate_by_type',
     'versioncontrol_project_validate_by_short_name',
+    'versioncontrol_project_developers_block_length',
+    'versioncontrol_project_maintainers_block_length',
   );
   foreach ($variables as $variable) {
     variable_del($variable);
@@ -236,5 +258,31 @@ function versioncontrol_project_update_6101() {
   $ret[] = update_sql("
     UPDATE {blocks} SET delta = 'site_active_projects'
     WHERE delta = '0' AND module = 'versioncontrol_project'");
+  return $ret;
+}
+
+/**
+ * Update 6102 (from 6.x-1.0-rc1 to rc2):
+ * Add the {versioncontrol_project_cache_block} table for the maintainers block.
+ */
+function versioncontrol_project_update_6102() {
+  $ret = array();
+  $table = array(
+    'fields' => array(
+      'cid' => array(
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'data' => array(
+        'type' => 'blob',
+        'not null' => FALSE,
+        'size' => 'big',
+      ),
+    ),
+    'primary key' => array('cid'),
+  );
+  db_create_table($ret, 'versioncontrol_project_cache_block', $table);
   return $ret;
 }
